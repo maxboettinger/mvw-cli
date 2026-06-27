@@ -1,3 +1,5 @@
+import httpx
+import respx
 from typer.testing import CliRunner
 
 import mvw.cli as cli
@@ -75,3 +77,53 @@ def test_download_excludes_audiodeskription(monkeypatch, tmp_path):
     )
     assert result.exit_code == 0
     assert result.stdout.lower().count("s07e05") == 1
+
+
+def test_real_mp4_download(monkeypatch, tmp_path):
+    """Locks finding #1: download import alias prevents command shadowing."""
+    rows = [_r("Feuer und Flamme (S07/E05)",
+               url_video="https://example.test/v.mp4",
+               url_video_hd="")]
+    monkeypatch.setattr(cli, "_make_client", lambda cfg: FakeClient(rows))
+
+    with respx.mock:
+        respx.get("https://example.test/v.mp4").mock(
+            return_value=httpx.Response(
+                200, content=b"video-bytes",
+                headers={"content-length": "11"},
+            )
+        )
+        result = runner.invoke(
+            cli.app,
+            ["download", "#Feuer und Flamme", "--resolution", "medium",
+             "--output", str(tmp_path)],
+        )
+
+    assert result.exit_code == 0
+    mp4_files = list(tmp_path.rglob("*.mp4"))
+    assert len(mp4_files) == 1
+    assert mp4_files[0].read_bytes() == b"video-bytes"
+
+
+def test_season_flag_gates_foldering(monkeypatch, tmp_path):
+    """Locks finding #2: --season gates Plex folder structure vs flat output."""
+    rows = [_r("Feuer und Flamme (S07/E05)"), _r("Feuer und Flamme (S07/E06)")]
+    monkeypatch.setattr(cli, "_make_client", lambda cfg: FakeClient(rows))
+
+    # With --season: full Plex path, Season 07 folder visible in dry-run output
+    result_season = runner.invoke(
+        cli.app,
+        ["download", "#Feuer und Flamme", "--season", "--dry-run",
+         "--output", str(tmp_path)],
+    )
+    assert result_season.exit_code == 0
+    assert "Season 07" in result_season.stdout
+
+    # Without --season: flat output, Season 07 must not appear, but s07e05 still in filename
+    result_flat = runner.invoke(
+        cli.app,
+        ["download", "#Feuer und Flamme", "--dry-run", "--output", str(tmp_path)],
+    )
+    assert result_flat.exit_code == 0
+    assert "Season 07" not in result_flat.stdout
+    assert "s07e05" in result_flat.stdout.lower()
