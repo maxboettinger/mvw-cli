@@ -38,10 +38,14 @@ The MVW API provides an expected byte `size` per entry but **no hash or
 checksum**. Therefore integrity is verified by **byte size**, not content hash.
 Two distinct oracles are used at two distinct moments:
 
-- **Pre-download skip check** (no network yet): the API `size` is the only value
-  available before connecting, so it is the oracle for "does a valid copy
-  already exist on disk?". Tolerance `0` (exact); when API `size <= 0` the check
-  degrades to "exists and non-empty".
+- **Pre-download skip check**: the API `size` field is unreliable as a
+  per-download oracle — it describes one specific quality while a different tier
+  is often downloaded — so an existing file is checked against the *actual* size
+  of the tier that would be fetched, obtained with a `remote_size` HTTP HEAD
+  probe (ranged-GET fallback). Tolerance `0` (exact); when the probe cannot
+  determine a size (or for HLS), the check degrades to "exists and non-empty".
+  The probe runs only when a target file already exists, so fresh downloads make
+  no extra request.
 - **Post-download completeness check** (inside the transfer): the HTTP
   `Content-Length` is what the server promised to send for *this* response, so
   it is the authoritative oracle for "did we receive every byte?". The API
@@ -64,19 +68,23 @@ def verify_size(path: Path, expected: int, *, tolerance: int = 0) -> bool
 
 ### 2. Pre-download skip check (`cli.py::_run_downloads`)
 
-The plan tuple is extended to carry the expected size:
-`(dest, url, tier, sub_url, expected_size)`, where `expected_size` is
-`ep.result.size`. For each item, unless `--force` is set:
+The plan tuple is `(dest, url, tier, sub_url)`. For each item, unless `--force`
+is set, when the target file already exists its expected size is obtained with a
+`remote_size(url)` probe (`None` for HLS):
 
 - valid existing file → status **already exists, skipped**; counted as skipped;
-  advance overall bar; no network request.
+  advance overall bar; no download.
 - exists but invalid → status **corrupted (size mismatch), redownloading**;
   counted as redownloaded; delete the bad file, then download.
-- missing → download; counted as downloaded.
+- missing → download (no probe); counted as downloaded.
 
-`--force` bypasses the check and always downloads (counted as downloaded).
+The probed size is also passed to `download()` as its `expected_size` fallback.
+`--force` bypasses the check and always downloads (counted as downloaded). A
+failed download prints a compact **✗ … failed: …** line and counts as failed; a
+subtitle fetch failure is isolated and never fails the video item.
 
-HLS items evaluate validity through the `expected <= 0` branch of `verify_size`.
+HLS items (and any item whose size cannot be probed) evaluate validity through
+the `expected <= 0` branch of `verify_size`.
 
 ### 3. Post-download verification (`download.py`)
 
@@ -102,8 +110,10 @@ it, the remote has changed — discard `.part` and restart. When no positive
 proceeds best-effort. On a `200` the server is sending the whole file, so the
 existing reset-to-`wb` behavior applies.
 
-`download_hls()` is unchanged: validity = ffmpeg exit code `0` + non-empty
-output file.
+`download_hls()` mirrors the same staging: ffmpeg muxes to a `.part` file which
+is promoted via `part.replace(dest)` only on exit code `0` and non-empty output
+(the `.part` is removed on failure), so an interrupted remux never leaves a
+corrupt final file.
 
 ### 4. Reporting (`cli.py`)
 
@@ -131,5 +141,3 @@ output file.
 ## Out of scope
 
 - Content-hash verification (no checksum is available from the API).
-- A pre-skip network probe of `Content-Length` (skip decisions are made from
-  the API size already in hand).
