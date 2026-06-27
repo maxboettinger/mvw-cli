@@ -15,7 +15,7 @@ from mvw import config as configmod
 from mvw import display, episodes, filters, naming, query
 from mvw.api import MediathekClient, MediathekError
 from mvw.download import (
-    DownloadError, download, download_hls, is_hls, pick_resolution,
+    DownloadError, FFmpegMissingError, download, download_hls, is_hls, pick_resolution,
 )
 
 app = typer.Typer(help="Search and download from MediathekViewWeb.", no_args_is_help=True)
@@ -160,6 +160,7 @@ def _run_downloads(plan, *, subtitles: bool) -> None:
         console=console,
     )
     failures = 0
+    ffmpeg_missing = False
     with progress:
         overall = progress.add_task("Overall", total=len(plan))
         for dest, url, _tier, sub_url in plan:
@@ -176,13 +177,20 @@ def _run_downloads(plan, *, subtitles: bool) -> None:
                     download(url, dest, on_progress=cb)
                 if subtitles and sub_url:
                     download(sub_url, dest.with_suffix(".xml"))
+            except FFmpegMissingError as exc:
+                ffmpeg_missing = True
+                err_console.print(display.error_panel(
+                    f"{dest.name}: {exc}\nInstall ffmpeg: https://ffmpeg.org/download.html"
+                ))
             except DownloadError as exc:
                 failures += 1
                 err_console.print(display.error_panel(f"{dest.name}: {exc}"))
             finally:
                 progress.update(task, visible=False)
                 progress.advance(overall)
-    if failures:
+    if ffmpeg_missing:
+        raise typer.Exit(4)
+    elif failures:
         raise typer.Exit(5)
 
 

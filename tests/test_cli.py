@@ -1,6 +1,7 @@
 from typer.testing import CliRunner
 
 import mvw.cli as cli
+from mvw.download import FFmpegMissingError
 from mvw.models import MediathekResult, QueryInfo, QueryResult
 
 runner = CliRunner()
@@ -44,6 +45,23 @@ def test_download_dry_run_lists_plan(monkeypatch, tmp_path):
     assert result.exit_code == 0
     assert "s07e05" in result.stdout
     assert "s07e06" in result.stdout
+
+
+def test_download_missing_ffmpeg_exits_4(monkeypatch, tmp_path):
+    rows = [_r("Feuer und Flamme (S07/E05)",
+               url_video="https://cdn.example.com/stream.m3u8",
+               url_video_hd="https://cdn.example.com/stream_hd.m3u8")]
+    monkeypatch.setattr(cli, "_make_client", lambda cfg: FakeClient(rows))
+
+    def _fake_download_hls(url, dest):
+        raise FFmpegMissingError("ffmpeg not found on PATH")
+
+    monkeypatch.setattr(cli, "download_hls", _fake_download_hls)
+    result = runner.invoke(
+        cli.app,
+        ["download", "#Feuer und Flamme", "--output", str(tmp_path)],
+    )
+    assert result.exit_code == 4
 
 
 def test_download_excludes_audiodeskription(monkeypatch, tmp_path):
