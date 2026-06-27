@@ -1,9 +1,34 @@
 [project]
-name = "or-cli"
-version = "0.1.0"
-description = "CLI for searching and downloading from MediathekViewWeb"
+name = "mvw-cli"
+description = "Search and download German public-broadcasting media from MediathekViewWeb, with Plex-friendly season downloads."
 readme = "README.md"
 requires-python = ">=3.13"
+dynamic = ["version"]
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Max Boettinger", email = "perplexity@bttngr.de" }]
+keywords = [
+    "mediathek",
+    "mediathekviewweb",
+    "ard",
+    "zdf",
+    "german",
+    "television",
+    "download",
+    "cli",
+    "plex",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Natural Language :: German",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Utilities",
+]
 dependencies = [
     "typer>=0.12",
     "rich>=13.7",
@@ -13,6 +38,12 @@ dependencies = [
 
 [project.scripts]
 mvw = "mvw.cli:app"
+
+# Fill these in once the project has a public home, then uncomment.
+# [project.urls]
+# Homepage = "https://github.com/<you>/mvw-cli"
+# Repository = "https://github.com/<you>/mvw-cli"
+# Issues = "https://github.com/<you>/mvw-cli/issues"
 
 [dependency-groups]
 dev = [
@@ -24,8 +55,19 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.version]
+path = "src/mvw/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/mvw"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/mvw",
+    "tests",
+    "README.md",
+    "LICENSE",
+]
 
 [tool.pytest.ini_options]
 markers = ["live: hits the real MediathekViewWeb API (opt-in)"]

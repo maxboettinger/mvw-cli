@@ -8,14 +8,37 @@ downloads.
 
 ## Install
 
-Requires Python ≥ 3.13 and [uv](https://github.com/astral-sh/uv).
+Requires Python ≥ 3.13. The distribution is published as **`mvw-cli`** (the
+PyPI name `mvw` was already taken); the installed command is `mvw`.
+
+Install as a standalone tool with [uv](https://github.com/astral-sh/uv):
 
 ```bash
-uv sync
+uv tool install mvw-cli      # adds the `mvw` command to your PATH
 ```
 
-This installs the `mvw` binary into the project virtualenv. Run it with
-`uv run mvw` or activate the environment first.
+Or run it once without installing:
+
+```bash
+uvx --from mvw-cli mvw search "#Tatort"
+```
+
+With pip:
+
+```bash
+pip install mvw-cli
+```
+
+> **Note:** HLS (`.m3u8`) downloads require [ffmpeg](https://ffmpeg.org/download.html)
+> on your `PATH`. It is an external (non-Python) dependency and is not installed
+> automatically.
+
+### From source
+
+```bash
+uv sync                      # create the dev environment
+uv run mvw --help            # run from the working tree
+```
 
 ## Query grammar
 

@@ -118,8 +118,7 @@ wheels = [
 ]
 
 [[package]]
-name = "or-cli"
-version = "0.1.0"
+name = "mvw-cli"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
