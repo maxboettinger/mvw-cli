@@ -179,7 +179,7 @@ Manage persistent configuration stored in `config.toml`
 (location: `platformdirs.user_config_dir("mvw")`).
 
 ```
-mvw config show              # Print effective config and sources
+mvw config show              # Print the effective config (key = value)
 mvw config set KEY VALUE     # Write a key to config.toml
 mvw config path              # Print the path to config.toml
 ```
