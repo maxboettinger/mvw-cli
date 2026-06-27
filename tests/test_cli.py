@@ -129,6 +129,83 @@ def test_season_flag_gates_foldering(monkeypatch, tmp_path):
     assert "s07e05" in result_flat.stdout.lower()
 
 
+def _fake_writer(calls, *, nbytes):
+    def fake_dl(url, dest, **kwargs):
+        calls.append(url)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"x" * nbytes)
+        return dest
+    return fake_dl
+
+
+def test_download_skips_existing_valid_file(monkeypatch, tmp_path):
+    rows = [_r("Feuer und Flamme (S07/E05)", size=11,
+               url_video="https://v.mp4", url_video_hd="")]
+    monkeypatch.setattr(cli, "_make_client", lambda cfg: FakeClient(rows))
+    calls = []
+    monkeypatch.setattr(cli, "download_file", _fake_writer(calls, nbytes=11))
+
+    args = ["download", "#Feuer und Flamme", "--resolution", "medium",
+            "--output", str(tmp_path)]
+    first = runner.invoke(cli.app, args)
+    assert first.exit_code == 0
+    assert len(calls) == 1
+
+    second = runner.invoke(cli.app, args)
+    assert second.exit_code == 0
+    assert len(calls) == 1  # not downloaded again
+    assert "already exists, skipped" in second.stdout
+
+
+def test_download_redownloads_corrupt_file(monkeypatch, tmp_path):
+    rows = [_r("Feuer und Flamme (S07/E05)", size=999,
+               url_video="https://v.mp4", url_video_hd="")]
+    monkeypatch.setattr(cli, "_make_client", lambda cfg: FakeClient(rows))
+    calls = []
+    # Writes only 5 bytes although the API size is 999 -> always "corrupt".
+    monkeypatch.setattr(cli, "download_file", _fake_writer(calls, nbytes=5))
+
+    args = ["download", "#Feuer und Flamme", "--resolution", "medium",
+            "--output", str(tmp_path)]
+    runner.invoke(cli.app, args)            # first download leaves a 5-byte file
+    second = runner.invoke(cli.app, args)   # sees size mismatch -> redownload
+    assert len(calls) == 2
+    assert "corrupted" in second.stdout
+    assert "redownloading" in second.stdout
+
+
+def test_download_force_redownloads_valid_file(monkeypatch, tmp_path):
+    rows = [_r("Feuer und Flamme (S07/E05)", size=11,
+               url_video="https://v.mp4", url_video_hd="")]
+    monkeypatch.setattr(cli, "_make_client", lambda cfg: FakeClient(rows))
+    calls = []
+    monkeypatch.setattr(cli, "download_file", _fake_writer(calls, nbytes=11))
+
+    base = ["download", "#Feuer und Flamme", "--resolution", "medium",
+            "--output", str(tmp_path)]
+    runner.invoke(cli.app, base)                       # 1 download
+    forced = runner.invoke(cli.app, base + ["--force"])
+    assert forced.exit_code == 0
+    assert len(calls) == 2                             # downloaded again
+    assert "already exists" not in forced.stdout
+
+
+def test_download_prints_summary(monkeypatch, tmp_path):
+    rows = [_r("Feuer und Flamme (S07/E05)", size=11,
+               url_video="https://v.mp4", url_video_hd="")]
+    monkeypatch.setattr(cli, "_make_client", lambda cfg: FakeClient(rows))
+    monkeypatch.setattr(cli, "download_file", _fake_writer([], nbytes=11))
+    result = runner.invoke(
+        cli.app,
+        ["download", "#Feuer und Flamme", "--resolution", "medium",
+         "--output", str(tmp_path)],
+    )
+    assert result.exit_code == 0
+    assert "Done:" in result.stdout
+    assert "1 downloaded" in result.stdout
+    assert "0 skipped" in result.stdout
+
+
 def test_overall_progress_counts_files_not_bytes():
     """Regression: the overall bar tracks a file count, so it must use a
     count column (MofN) and never byte/speed columns, which produced the
