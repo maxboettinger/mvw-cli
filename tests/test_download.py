@@ -4,7 +4,7 @@ import httpx
 import pytest
 import respx
 
-from mvw.download import DownloadError, download, download_hls, is_hls, pick_resolution
+from mvw.download import DownloadError, download, download_hls, is_hls, pick_resolution, remote_size, verify_size
 from mvw.models import MediathekResult
 
 
@@ -92,5 +92,145 @@ def test_download_hls_reports_progress_and_writes_output(tmp_path: Path):
 
 def test_download_hls_raises_on_ffmpeg_failure(tmp_path: Path):
     ffmpeg = _fake_ffmpeg(tmp_path, rc=1)
+    dest = tmp_path / "out.mkv"
     with pytest.raises(DownloadError, match="ffmpeg failed"):
-        download_hls("https://x/playlist.m3u8", tmp_path / "out.mkv", ffmpeg=str(ffmpeg))
+        download_hls("https://x/playlist.m3u8", dest, ffmpeg=str(ffmpeg))
+    assert not dest.exists()
+    assert not dest.with_name("out.mkv.part").exists()
+
+
+def test_verify_size_missing_file(tmp_path):
+    assert verify_size(tmp_path / "nope.mp4", 10) is False
+
+
+def test_verify_size_zero_byte_file(tmp_path):
+    f = tmp_path / "empty.mp4"
+    f.write_bytes(b"")
+    assert verify_size(f, 10) is False
+    # expected<=0 path also rejects an empty file
+    assert verify_size(f, 0) is False
+
+
+def test_verify_size_exact_match(tmp_path):
+    f = tmp_path / "ok.mp4"
+    f.write_bytes(b"0123456789")  # 10 bytes
+    assert verify_size(f, 10) is True
+
+
+def test_verify_size_off_by_one_mismatch(tmp_path):
+    f = tmp_path / "bad.mp4"
+    f.write_bytes(b"012345678")  # 9 bytes
+    assert verify_size(f, 10) is False
+    assert verify_size(f, 10, tolerance=1) is True
+
+
+def test_verify_size_unknown_expected_accepts_nonempty(tmp_path):
+    f = tmp_path / "hls.mkv"
+    f.write_bytes(b"x")
+    assert verify_size(f, 0) is True
+    assert verify_size(f, -1) is True
+
+
+class _ShortStream(httpx.SyncByteStream):
+    """Yields fewer bytes than the caller's expected_size, with no length header."""
+
+    def __iter__(self):
+        yield b"hello"  # 5 bytes
+
+    def close(self):
+        pass
+
+
+@respx.mock
+def test_download_raises_when_short_of_expected_size(tmp_path: Path):
+    respx.get("https://v/m.mp4").mock(
+        return_value=httpx.Response(200, stream=_ShortStream())
+    )
+    dest = tmp_path / "out.mp4"
+    with pytest.raises(DownloadError, match="size mismatch"):
+        download("https://v/m.mp4", dest, expected_size=11)
+    assert not dest.exists()
+    assert not dest.with_name("out.mp4.part").exists()
+
+
+@respx.mock
+def test_download_restarts_when_remote_total_differs(tmp_path: Path):
+    dest = tmp_path / "out.mp4"
+    part = dest.with_name("out.mp4.part")
+    part.write_bytes(b"OLDOLD")  # 6 stale bytes from a previous run
+
+    seen_ranges: list[str | None] = []
+
+    def handler(request):
+        rng = request.headers.get("range")
+        seen_ranges.append(rng)
+        if rng is not None:
+            # Resume attempt: server reports a different total (11) than the
+            # caller's expected_size (20) -> remote changed, must restart.
+            return httpx.Response(
+                206, content=b"world",
+                headers={"content-range": "bytes 6-10/11", "content-length": "5"},
+            )
+        # Restart attempt: full file from byte 0.
+        return httpx.Response(
+            200, content=b"hello world", headers={"content-length": "11"}
+        )
+
+    respx.get("https://v/m.mp4").mock(side_effect=handler)
+    download("https://v/m.mp4", dest, expected_size=20)
+
+    assert dest.read_bytes() == b"hello world"
+    assert seen_ranges == ["bytes=6-", None]  # tried resume, then restarted clean
+    assert not part.exists()
+
+
+@respx.mock
+def test_download_resume_continues_on_valid_206(tmp_path: Path):
+    dest = tmp_path / "out.mp4"
+    part = dest.with_name("out.mp4.part")
+    part.write_bytes(b"hello ")  # 6 bytes already present
+
+    def handler(request):
+        assert request.headers["range"] == "bytes=6-"
+        return httpx.Response(
+            206, content=b"world",
+            headers={"content-range": "bytes 6-10/11", "content-length": "5"},
+        )
+
+    respx.get("https://v/m.mp4").mock(side_effect=handler)
+    # expected_size matches the server's total (11), so the resume guard stays
+    # inert and the partial is continued, not restarted.
+    download("https://v/m.mp4", dest, expected_size=11)
+    assert dest.read_bytes() == b"hello world"
+    assert not part.exists()
+
+
+@respx.mock
+def test_remote_size_from_head(tmp_path: Path):
+    respx.head("https://v/m.mp4").mock(
+        return_value=httpx.Response(200, headers={"content-length": "4242"})
+    )
+    assert remote_size("https://v/m.mp4") == 4242
+
+
+@respx.mock
+def test_remote_size_falls_back_to_range_when_head_unsupported():
+    respx.head("https://v/m.mp4").mock(return_value=httpx.Response(405))
+    respx.get("https://v/m.mp4").mock(
+        return_value=httpx.Response(206, headers={"content-range": "bytes 0-0/9001"})
+    )
+    assert remote_size("https://v/m.mp4") == 9001
+
+
+@respx.mock
+def test_remote_size_none_when_unknown():
+    respx.head("https://v/m.mp4").mock(return_value=httpx.Response(200))  # no length
+    respx.get("https://v/m.mp4").mock(return_value=httpx.Response(200))   # ignores range
+    assert remote_size("https://v/m.mp4") is None
+
+
+@respx.mock
+def test_remote_size_none_on_network_error():
+    respx.head("https://v/m.mp4").mock(side_effect=httpx.ConnectError("boom"))
+    respx.get("https://v/m.mp4").mock(side_effect=httpx.ConnectError("boom"))
+    assert remote_size("https://v/m.mp4") is None

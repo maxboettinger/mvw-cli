@@ -135,6 +135,24 @@ mvw download QUERY
 | `--season-number` | — | Override detected season number |
 | `--subtitles` | off | Also fetch subtitle files alongside each video |
 | `--limit` | 200 | Maximum number of entries to resolve |
+| `--force` | off | Redownload every matched entry even if a valid file already exists |
+
+#### Download behavior and verification
+
+By default, `download` checks each target path before fetching:
+
+- an existing file is checked by probing the actual size of the version that
+  would be downloaded (an HTTP HEAD, falling back to a ranged request) and
+  comparing it to the file on disk; a match → `✓ … already exists, skipped`,
+  a mismatch → `⚠ … corrupted (size mismatch), redownloading`;
+- if the size cannot be determined (or for HLS `.m3u8`, which has no single
+  size), any non-empty existing file is treated as complete.
+
+Each fresh download is verified against the server's `Content-Length` before
+the temporary `.part` file is promoted to its final name (this now applies to
+HLS too, which is muxed to a `.part` and promoted only after ffmpeg succeeds),
+so an interrupted transfer never leaves a corrupt final file. A run ends with a
+summary line, e.g. `Done: 8 downloaded, 5 skipped, 2 redownloaded, 1 failed`.
 
 #### Filename template
 

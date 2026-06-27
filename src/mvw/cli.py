@@ -16,7 +16,8 @@ from mvw import config as configmod
 from mvw import display, episodes, filters, naming, query
 from mvw.api import MediathekClient, MediathekError
 from mvw.download import (
-    DownloadError, FFmpegMissingError, download as download_file, download_hls, is_hls, pick_resolution,
+    DownloadError, FFmpegMissingError, download as download_file, download_hls,
+    is_hls, pick_resolution, remote_size, verify_size,
 )
 
 app = typer.Typer(help="Search and download from MediathekViewWeb.", no_args_is_help=True)
@@ -95,6 +96,7 @@ def download(
     latest_season: bool = typer.Option(False, "--latest-season"),
     season_number: Optional[int] = typer.Option(None, "--season-number"),
     subtitles: bool = typer.Option(False, "--subtitles"),
+    force: bool = typer.Option(False, "--force", help="redownload even if a valid file exists"),
     limit: int = typer.Option(200, "--limit", help="max entries to resolve"),
 ) -> None:
     cfg = configmod.load()
@@ -149,7 +151,7 @@ def download(
         console.print(f"[dim]{len(plan)} file(s) planned[/]")
         return
 
-    _run_downloads(plan, subtitles=subtitles)
+    _run_downloads(plan, subtitles=subtitles, force=force)
 
 
 def _make_progress() -> tuple[Progress, Progress, Group]:
@@ -178,40 +180,74 @@ def _make_progress() -> tuple[Progress, Progress, Group]:
     return overall, per_file, Group(overall, per_file)
 
 
-def _run_downloads(plan, *, subtitles: bool) -> None:
+def _run_downloads(plan, *, subtitles: bool, force: bool = False) -> None:
     overall_progress, file_progress, group = _make_progress()
-    failures = 0
+    counts = {"downloaded": 0, "skipped": 0, "redownloaded": 0, "failed": 0}
     ffmpeg_missing = False
+    pkw = dict(no_wrap=True, overflow="ignore", crop=False)
     with Live(group, console=console):
         overall = overall_progress.add_task("Overall", total=len(plan))
         for dest, url, _tier, sub_url in plan:
+            hls = is_hls(url)
+            probe: int | None = None
+            is_redownload = False
+            if not force and dest.exists():
+                # Probe the real size of the tier we'd fetch; HLS has no single
+                # size, so fall back to "exists and non-empty".
+                probe = None if hls else remote_size(url)
+                expected = 0 if (hls or probe is None) else probe
+                if verify_size(dest, expected):
+                    console.print(f"[green]✓[/] {dest.name} — already exists, skipped", **pkw)
+                    counts["skipped"] += 1
+                    overall_progress.advance(overall)
+                    continue
+                console.print(
+                    f"[yellow]⚠[/] {dest.name} — corrupted (size mismatch), redownloading",
+                    **pkw,
+                )
+                dest.unlink(missing_ok=True)
+                is_redownload = True
+
             task = file_progress.add_task(dest.name, total=None)
 
             def cb(done: int, total, _t=task):
                 file_progress.update(_t, completed=done, total=total)
 
             try:
-                if is_hls(url):
+                if hls:
                     file_progress.update(task, description=f"{dest.name} (ffmpeg)")
                     download_hls(url, dest, on_progress=cb)
                 else:
-                    download_file(url, dest, on_progress=cb)
+                    download_file(url, dest, on_progress=cb, expected_size=probe)
+                counts["redownloaded" if is_redownload else "downloaded"] += 1
+                console.print(f"[cyan]↓[/] {dest.name} — downloaded", **pkw)
                 if subtitles and sub_url:
-                    download_file(sub_url, dest.with_suffix(".xml"))
+                    try:
+                        download_file(sub_url, dest.with_suffix(".xml"))
+                    except DownloadError as exc:
+                        err_console.print(
+                            f"[yellow]⚠[/] {dest.name} (subtitle) — failed: {exc}", **pkw
+                        )
             except FFmpegMissingError as exc:
                 ffmpeg_missing = True
                 err_console.print(display.error_panel(
                     f"{dest.name}: {exc}\nInstall ffmpeg: https://ffmpeg.org/download.html"
                 ))
             except DownloadError as exc:
-                failures += 1
-                err_console.print(display.error_panel(f"{dest.name}: {exc}"))
+                counts["failed"] += 1
+                console.print(f"[red]✗[/] {dest.name} — failed: {exc}", **pkw)
             finally:
                 file_progress.update(task, visible=False)
                 overall_progress.advance(overall)
+    console.print(
+        f"[bold]Done:[/] {counts['downloaded']} downloaded, "
+        f"{counts['skipped']} skipped, {counts['redownloaded']} redownloaded, "
+        f"{counts['failed']} failed",
+        **pkw,
+    )
     if ffmpeg_missing:
         raise typer.Exit(4)
-    elif failures:
+    elif counts["failed"]:
         raise typer.Exit(5)
 
 
