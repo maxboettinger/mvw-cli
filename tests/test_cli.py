@@ -55,7 +55,7 @@ def test_download_missing_ffmpeg_exits_4(monkeypatch, tmp_path):
                url_video_hd="https://cdn.example.com/stream_hd.m3u8")]
     monkeypatch.setattr(cli, "_make_client", lambda cfg: FakeClient(rows))
 
-    def _fake_download_hls(url, dest):
+    def _fake_download_hls(url, dest, **kwargs):
         raise FFmpegMissingError("ffmpeg not found on PATH")
 
     monkeypatch.setattr(cli, "download_hls", _fake_download_hls)
@@ -127,3 +127,22 @@ def test_season_flag_gates_foldering(monkeypatch, tmp_path):
     assert result_flat.exit_code == 0
     assert "Season 07" not in result_flat.stdout
     assert "s07e05" in result_flat.stdout.lower()
+
+
+def test_overall_progress_counts_files_not_bytes():
+    """Regression: the overall bar tracks a file count, so it must use a
+    count column (MofN) and never byte/speed columns, which produced the
+    bogus "10/10 bytes" / "0 bytes/s" display."""
+    from rich.progress import (
+        DownloadColumn, MofNCompleteColumn, TransferSpeedColumn,
+    )
+
+    overall, per_file, _ = cli._make_progress()
+
+    assert any(isinstance(c, MofNCompleteColumn) for c in overall.columns)
+    assert not any(
+        isinstance(c, (DownloadColumn, TransferSpeedColumn)) for c in overall.columns
+    )
+    # Per-file bars are byte-based and keep the byte/speed columns.
+    assert any(isinstance(c, DownloadColumn) for c in per_file.columns)
+    assert any(isinstance(c, TransferSpeedColumn) for c in per_file.columns)
