@@ -30,3 +30,22 @@ def test_render_custom_template():
     tmpl = "{series}.{year}.S{s:02d}E{e:02d}.{res}.{ext}"
     p = render(_ep(), template=tmpl, tier="medium", ext="mp4")
     assert p == Path("Feuer und Flamme.2019.S07E05.720p.mp4")
+
+
+def test_render_prevents_path_injection_in_token_values():
+    """Slashes in series/title must not create extra directory levels."""
+    ep = _ep(
+        title="Berlin/Köln (S01/E03)",
+        topic="Tatort: Köln/Bonn"
+    )
+    p = render(ep, tier="high", ext="mp4")
+    # With the default template "{series} ({year})/Season {s:02d}/{series} ({year}) - s{s:02d}e{e:02d} - {ep_title} [{res}].{ext}",
+    # we expect exactly 3 parts after split: [series_dir, season_dir, filename]
+    # If slashes were NOT scrubbed, we'd get extra parts like ["Tatort: Köln", "Bonn", ...]
+    assert len(p.parts) == 3
+    # Verify that slashes were replaced with spaces in the parts
+    # The series part should contain the scrubbed topic (spaces instead of slashes)
+    assert "Tatort" in p.parts[0] and "Bonn" in p.parts[0]
+    assert "Season 07" in p.parts[1]
+    # The filename should contain the scrubbed episode title (spaces instead of slashes)
+    assert "Berlin" in p.parts[2] and "Köln" in p.parts[2]

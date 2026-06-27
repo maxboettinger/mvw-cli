@@ -37,6 +37,11 @@ def render(
         "date": r.aired.strftime("%Y-%m-%d"),
         "ext": ext,
     }
+    # Scrub path separators from string values to prevent path injection.
+    # Integers (year, s, e) are left unchanged to preserve format specs like :02d.
+    for key in ["series", "ep_title", "res", "channel", "date", "ext"]:
+        if isinstance(values[key], str):
+            values[key] = values[key].replace("/", " ").replace("\\", " ")
     rendered = template.format(**values)
     parts = [sanitize(p) for p in rendered.split("/") if p]
     return Path(*parts)
