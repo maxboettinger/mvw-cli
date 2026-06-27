@@ -3,7 +3,7 @@ name = "mvw-cli"
 description = "Search and download German public-broadcasting media from MediathekViewWeb, with Plex-friendly season downloads."
 readme = "README.md"
 requires-python = ">=3.13"
-version = "0.1.0"
+version = "0.1.1"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Max Boettinger", email = "perplexity@bttngr.de" }]
