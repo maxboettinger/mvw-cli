@@ -4,7 +4,7 @@ import httpx
 import pytest
 import respx
 
-from mvw.download import DownloadError, download, download_hls, is_hls, pick_resolution
+from mvw.download import DownloadError, download, download_hls, is_hls, pick_resolution, verify_size
 from mvw.models import MediathekResult
 
 
@@ -94,3 +94,35 @@ def test_download_hls_raises_on_ffmpeg_failure(tmp_path: Path):
     ffmpeg = _fake_ffmpeg(tmp_path, rc=1)
     with pytest.raises(DownloadError, match="ffmpeg failed"):
         download_hls("https://x/playlist.m3u8", tmp_path / "out.mkv", ffmpeg=str(ffmpeg))
+
+
+def test_verify_size_missing_file(tmp_path):
+    assert verify_size(tmp_path / "nope.mp4", 10) is False
+
+
+def test_verify_size_zero_byte_file(tmp_path):
+    f = tmp_path / "empty.mp4"
+    f.write_bytes(b"")
+    assert verify_size(f, 10) is False
+    # expected<=0 path also rejects an empty file
+    assert verify_size(f, 0) is False
+
+
+def test_verify_size_exact_match(tmp_path):
+    f = tmp_path / "ok.mp4"
+    f.write_bytes(b"0123456789")  # 10 bytes
+    assert verify_size(f, 10) is True
+
+
+def test_verify_size_off_by_one_mismatch(tmp_path):
+    f = tmp_path / "bad.mp4"
+    f.write_bytes(b"012345678")  # 9 bytes
+    assert verify_size(f, 10) is False
+    assert verify_size(f, 10, tolerance=1) is True
+
+
+def test_verify_size_unknown_expected_accepts_nonempty(tmp_path):
+    f = tmp_path / "hls.mkv"
+    f.write_bytes(b"x")
+    assert verify_size(f, 0) is True
+    assert verify_size(f, -1) is True

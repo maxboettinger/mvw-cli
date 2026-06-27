@@ -26,6 +26,23 @@ def is_hls(url: str) -> bool:
     return ".m3u8" in url.split("?", 1)[0].lower()
 
 
+def verify_size(path: Path, expected: int, *, tolerance: int = 0) -> bool:
+    """Return True if ``path`` is a plausibly complete download.
+
+    When ``expected`` is positive it is the byte oracle (the API ``size``):
+    the file must exist and its size must be within ``tolerance`` of it. When
+    ``expected`` is non-positive (e.g. HLS, where no reliable size exists),
+    validity degrades to "exists and is non-empty".
+    """
+    try:
+        actual = path.stat().st_size
+    except OSError:
+        return False
+    if expected > 0:
+        return abs(actual - expected) <= tolerance
+    return actual > 0
+
+
 def pick_resolution(result: MediathekResult, preference: str) -> tuple[str, str]:
     url, tier = result.resolve_video(preference)
     if not url:
