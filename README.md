@@ -221,6 +221,19 @@ CLI flags always override config file values, which override built-in defaults.
 | 4 | HLS entry encountered but ffmpeg is not installed |
 | 5 | Partial/interrupted download failure |
 
+## Releasing
+
+Cutting a release is one command. It verifies the tree is clean and in sync,
+runs the tests, bumps the version, commits, tags, and pushes — and the pushed
+tag triggers the GitHub Actions workflow that publishes to PyPI via Trusted
+Publishing.
+
+```bash
+scripts/release.sh            # patch bump (default): 0.1.0 → 0.1.1
+scripts/release.sh minor      # 0.1.0 → 0.2.0
+scripts/release.sh major      # 0.1.0 → 1.0.0
+```
+
 ## Running tests
 
 ```bash
