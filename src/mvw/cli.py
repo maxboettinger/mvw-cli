@@ -17,7 +17,7 @@ from mvw import display, episodes, filters, naming, query
 from mvw.api import MediathekClient, MediathekError
 from mvw.download import (
     DownloadError, FFmpegMissingError, download as download_file, download_hls,
-    is_hls, pick_resolution, verify_size,
+    is_hls, pick_resolution, remote_size, verify_size,
 )
 
 app = typer.Typer(help="Search and download from MediathekViewWeb.", no_args_is_help=True)
@@ -133,8 +133,8 @@ def download(
     else:
         ordered = eps
 
-    # Build plan: (dest_path, url, tier, subtitle_url, expected_size)
-    plan: list[tuple[Path, str, str, str, int]] = []
+    # Build plan: (dest_path, url, tier, subtitle_url)
+    plan: list[tuple[Path, str, str, str]] = []
     for ep in ordered:
         try:
             url, tier = pick_resolution(ep.result, pref)
@@ -144,10 +144,10 @@ def download(
         ext = "mp4"
         rendered = naming.render(ep, template=tmpl, tier=tier, ext=ext)
         dest = out_dir / rendered if season else out_dir / rendered.name
-        plan.append((dest, url, tier, ep.result.url_subtitle, ep.result.size))
+        plan.append((dest, url, tier, ep.result.url_subtitle))
 
     if dry_run:
-        console.print(display.dry_run_tree([(d, u, t) for d, u, t, _s, _sz in plan]))
+        console.print(display.dry_run_tree([(d, u, t) for d, u, t, _ in plan]))
         console.print(f"[dim]{len(plan)} file(s) planned[/]")
         return
 
@@ -184,26 +184,26 @@ def _run_downloads(plan, *, subtitles: bool, force: bool = False) -> None:
     overall_progress, file_progress, group = _make_progress()
     counts = {"downloaded": 0, "skipped": 0, "redownloaded": 0, "failed": 0}
     ffmpeg_missing = False
+    pkw = dict(no_wrap=True, overflow="ignore", crop=False)
     with Live(group, console=console):
         overall = overall_progress.add_task("Overall", total=len(plan))
-        for dest, url, _tier, sub_url, size in plan:
+        for dest, url, _tier, sub_url in plan:
             hls = is_hls(url)
-            # HLS output has no reliable expected size; fall back to non-empty.
-            expected = 0 if hls else size
-
+            probe: int | None = None
             is_redownload = False
             if not force and dest.exists():
+                # Probe the real size of the tier we'd fetch; HLS has no single
+                # size, so fall back to "exists and non-empty".
+                probe = None if hls else remote_size(url)
+                expected = 0 if (hls or probe is None) else probe
                 if verify_size(dest, expected):
-                    console.print(
-                        f"[green]✓[/] {dest.name} — already exists, skipped",
-                        no_wrap=True, overflow="ignore", crop=False,
-                    )
+                    console.print(f"[green]✓[/] {dest.name} — already exists, skipped", **pkw)
                     counts["skipped"] += 1
                     overall_progress.advance(overall)
                     continue
                 console.print(
                     f"[yellow]⚠[/] {dest.name} — corrupted (size mismatch), redownloading",
-                    no_wrap=True, overflow="ignore", crop=False,
+                    **pkw,
                 )
                 dest.unlink(missing_ok=True)
                 is_redownload = True
@@ -218,14 +218,16 @@ def _run_downloads(plan, *, subtitles: bool, force: bool = False) -> None:
                     file_progress.update(task, description=f"{dest.name} (ffmpeg)")
                     download_hls(url, dest, on_progress=cb)
                 else:
-                    download_file(url, dest, on_progress=cb, expected_size=size)
-                if subtitles and sub_url:
-                    download_file(sub_url, dest.with_suffix(".xml"))
+                    download_file(url, dest, on_progress=cb, expected_size=probe)
                 counts["redownloaded" if is_redownload else "downloaded"] += 1
-                console.print(
-                    f"[cyan]↓[/] {dest.name} — downloaded",
-                    no_wrap=True, overflow="ignore", crop=False,
-                )
+                console.print(f"[cyan]↓[/] {dest.name} — downloaded", **pkw)
+                if subtitles and sub_url:
+                    try:
+                        download_file(sub_url, dest.with_suffix(".xml"))
+                    except DownloadError as exc:
+                        err_console.print(
+                            f"[yellow]⚠[/] {dest.name} (subtitle) — failed: {exc}", **pkw
+                        )
             except FFmpegMissingError as exc:
                 ffmpeg_missing = True
                 err_console.print(display.error_panel(
@@ -233,7 +235,7 @@ def _run_downloads(plan, *, subtitles: bool, force: bool = False) -> None:
                 ))
             except DownloadError as exc:
                 counts["failed"] += 1
-                err_console.print(display.error_panel(f"{dest.name}: {exc}"))
+                console.print(f"[red]✗[/] {dest.name} — failed: {exc}", **pkw)
             finally:
                 file_progress.update(task, visible=False)
                 overall_progress.advance(overall)
@@ -241,7 +243,7 @@ def _run_downloads(plan, *, subtitles: bool, force: bool = False) -> None:
         f"[bold]Done:[/] {counts['downloaded']} downloaded, "
         f"{counts['skipped']} skipped, {counts['redownloaded']} redownloaded, "
         f"{counts['failed']} failed",
-        no_wrap=True, overflow="ignore", crop=False,
+        **pkw,
     )
     if ffmpeg_missing:
         raise typer.Exit(4)

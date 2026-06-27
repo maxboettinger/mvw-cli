@@ -144,6 +144,7 @@ def test_download_skips_existing_valid_file(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "_make_client", lambda cfg: FakeClient(rows))
     calls = []
     monkeypatch.setattr(cli, "download_file", _fake_writer(calls, nbytes=11))
+    monkeypatch.setattr(cli, "remote_size", lambda url, **kw: 11)
 
     args = ["download", "#Feuer und Flamme", "--resolution", "medium",
             "--output", str(tmp_path)]
@@ -162,8 +163,9 @@ def test_download_redownloads_corrupt_file(monkeypatch, tmp_path):
                url_video="https://v.mp4", url_video_hd="")]
     monkeypatch.setattr(cli, "_make_client", lambda cfg: FakeClient(rows))
     calls = []
-    # Writes only 5 bytes although the API size is 999 -> always "corrupt".
+    # Writes only 5 bytes although the server "really" has 11 -> always "corrupt".
     monkeypatch.setattr(cli, "download_file", _fake_writer(calls, nbytes=5))
+    monkeypatch.setattr(cli, "remote_size", lambda url, **kw: 11)
 
     args = ["download", "#Feuer und Flamme", "--resolution", "medium",
             "--output", str(tmp_path)]

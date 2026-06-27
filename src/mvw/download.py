@@ -43,6 +43,45 @@ def verify_size(path: Path, expected: int, *, tolerance: int = 0) -> bool:
     return actual > 0
 
 
+def remote_size(url: str, *, client: httpx.Client | None = None) -> int | None:
+    """Best-effort probe of a URL's byte size without downloading the body.
+
+    Tries an HTTP HEAD first; if that gives no usable size (many CDNs reject
+    HEAD), falls back to a ranged GET and reads the total from Content-Range
+    WITHOUT reading the body. Returns the size in bytes, or None when it cannot
+    be determined or any network error occurs. Never raises — callers use it
+    only as a hint.
+    """
+    owns_client = client is None
+    client = client or httpx.Client(timeout=30.0, follow_redirects=True)
+    try:
+        try:
+            resp = client.head(url)
+            if resp.status_code == 200:
+                cl = resp.headers.get("content-length")
+                if cl is not None and cl.isdigit():
+                    return int(cl)
+        except httpx.HTTPError:
+            pass
+        # Fallback: a 1-byte ranged GET exposes the full size via Content-Range.
+        # Use stream() and never read the body, so a server that ignores Range
+        # (returns 200) does not trigger a full download.
+        try:
+            with client.stream("GET", url, headers={"Range": "bytes=0-0"}) as resp:
+                if resp.status_code == 206:
+                    cr = resp.headers.get("content-range")  # "bytes 0-0/12345"
+                    if cr and "/" in cr:
+                        total = cr.rsplit("/", 1)[1]
+                        if total.isdigit():
+                            return int(total)
+        except httpx.HTTPError:
+            pass
+        return None
+    finally:
+        if owns_client:
+            client.close()
+
+
 def pick_resolution(result: MediathekResult, preference: str) -> tuple[str, str]:
     url, tier = result.resolve_video(preference)
     if not url:
@@ -145,14 +184,16 @@ def download_hls(
             "ffmpeg not found on PATH; required for HLS (.m3u8) downloads"
         )
     dest.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [ffmpeg, "-y", "-i", url, "-c", "copy", str(dest)]
+    part = dest.with_name(dest.name + ".part")
+    part.unlink(missing_ok=True)
+    cmd = [ffmpeg, "-y", "-i", url, "-c", "copy", str(part)]
 
     def report() -> None:
         # HLS has no known total, so report bytes written so far against an
         # indeterminate total (None) to drive a live size/speed display.
         if on_progress is not None:
             try:
-                on_progress(dest.stat().st_size, None)
+                on_progress(part.stat().st_size, None)
             except OSError:
                 pass
 
@@ -169,6 +210,11 @@ def download_hls(
         if proc.returncode != 0:
             errf.seek(0)
             tail = errf.read()[-300:]
+            part.unlink(missing_ok=True)
             raise DownloadError(f"ffmpeg failed ({proc.returncode}): {tail}")
     report()
+    if part.stat().st_size == 0:
+        part.unlink(missing_ok=True)
+        raise DownloadError("ffmpeg produced an empty output file")
+    part.replace(dest)
     return dest
