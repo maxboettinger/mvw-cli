@@ -34,11 +34,18 @@ downloads can be silently presented as complete.
 
 ## Integrity model
 
-The MVW API provides an exact expected byte `size` per entry but **no hash or
+The MVW API provides an expected byte `size` per entry but **no hash or
 checksum**. Therefore integrity is verified by **byte size**, not content hash.
+Two distinct oracles are used at two distinct moments:
 
-- HTTP downloads: expected size = API `size` when `> 0`, else the HTTP
-  `Content-Length`. Tolerance is `0` (exact).
+- **Pre-download skip check** (no network yet): the API `size` is the only value
+  available before connecting, so it is the oracle for "does a valid copy
+  already exist on disk?". Tolerance `0` (exact); when API `size <= 0` the check
+  degrades to "exists and non-empty".
+- **Post-download completeness check** (inside the transfer): the HTTP
+  `Content-Length` is what the server promised to send for *this* response, so
+  it is the authoritative oracle for "did we receive every byte?". The API
+  `size` is used only as a fallback when the server sends no `Content-Length`.
 - HLS downloads (`.m3u8`): the output is a remuxed container with no reliable
   expected size, so validity = "exists and non-empty" only.
 
@@ -73,19 +80,27 @@ HLS items evaluate validity through the `expected <= 0` branch of `verify_size`.
 
 ### 3. Post-download verification (`download.py`)
 
-`download()` gains `expected_size: int | None`:
+`download()` gains `expected_size: int | None` (the API `size`, passed only as a
+fallback):
 
-- After the stream completes, compute the effective expected size
-  (`expected_size` if given and `> 0`, else the HTTP `Content-Length` total).
+- After the stream completes, compute the effective expected size: the HTTP
+  `Content-Length` total when present, else `expected_size` when given and `> 0`.
 - If an effective expected size exists and bytes written != expected: delete
   `.part` and raise `DownloadError("size mismatch: got X, expected Y")`.
+- If neither a `Content-Length` nor a positive `expected_size` is available, the
+  transfer cannot be size-verified; it is accepted as-is (still gated by the
+  absence of a `TransportError`).
 - Only on success is `.part` promoted via `part.replace(dest)`, so an
   interrupted/failed run never leaves a corrupt **final** file.
 
-Resume guard: resume from an existing `.part` only if the server returns `206`
-**and** the computed total equals the expected size. Otherwise discard `.part`
-and restart from scratch (`wb`). On `200` the existing reset-to-`wb` behavior
-applies.
+Resume guard: when resuming from an existing `.part`, discard it and restart
+from scratch (`wb`) unless the server returns `206`. On a `206`, if a positive
+`expected_size` was supplied and the computed total (existing bytes +
+`Content-Length`, equivalently the `/total` of `Content-Range`) does not equal
+it, the remote has changed — discard `.part` and restart. When no positive
+`expected_size` is available the total cannot be cross-checked and the resume
+proceeds best-effort. On a `200` the server is sending the whole file, so the
+existing reset-to-`wb` behavior applies.
 
 `download_hls()` is unchanged: validity = ffmpeg exit code `0` + non-empty
 output file.
