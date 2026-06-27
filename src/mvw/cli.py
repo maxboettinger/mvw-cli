@@ -222,7 +222,10 @@ def _run_downloads(plan, *, subtitles: bool, force: bool = False) -> None:
                 if subtitles and sub_url:
                     download_file(sub_url, dest.with_suffix(".xml"))
                 counts["redownloaded" if is_redownload else "downloaded"] += 1
-                console.print(f"[cyan]↓[/] {dest.name} — downloaded")
+                console.print(
+                    f"[cyan]↓[/] {dest.name} — downloaded",
+                    no_wrap=True, overflow="ignore", crop=False,
+                )
             except FFmpegMissingError as exc:
                 ffmpeg_missing = True
                 err_console.print(display.error_panel(
@@ -237,7 +240,8 @@ def _run_downloads(plan, *, subtitles: bool, force: bool = False) -> None:
     console.print(
         f"[bold]Done:[/] {counts['downloaded']} downloaded, "
         f"{counts['skipped']} skipped, {counts['redownloaded']} redownloaded, "
-        f"{counts['failed']} failed"
+        f"{counts['failed']} failed",
+        no_wrap=True, overflow="ignore", crop=False,
     )
     if ffmpeg_missing:
         raise typer.Exit(4)

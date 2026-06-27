@@ -169,6 +169,7 @@ def test_download_redownloads_corrupt_file(monkeypatch, tmp_path):
             "--output", str(tmp_path)]
     runner.invoke(cli.app, args)            # first download leaves a 5-byte file
     second = runner.invoke(cli.app, args)   # sees size mismatch -> redownload
+    assert second.exit_code == 0
     assert len(calls) == 2
     assert "corrupted" in second.stdout
     assert "redownloading" in second.stdout
@@ -204,6 +205,7 @@ def test_download_prints_summary(monkeypatch, tmp_path):
     assert "Done:" in result.stdout
     assert "1 downloaded" in result.stdout
     assert "0 skipped" in result.stdout
+    assert "0 redownloaded, 0 failed" in result.stdout
 
 
 def test_overall_progress_counts_files_not_bytes():
