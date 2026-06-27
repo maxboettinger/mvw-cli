@@ -126,3 +126,56 @@ def test_verify_size_unknown_expected_accepts_nonempty(tmp_path):
     f.write_bytes(b"x")
     assert verify_size(f, 0) is True
     assert verify_size(f, -1) is True
+
+
+class _ShortStream(httpx.SyncByteStream):
+    """Yields fewer bytes than the caller's expected_size, with no length header."""
+
+    def __iter__(self):
+        yield b"hello"  # 5 bytes
+
+    def close(self):
+        pass
+
+
+@respx.mock
+def test_download_raises_when_short_of_expected_size(tmp_path: Path):
+    respx.get("https://v/m.mp4").mock(
+        return_value=httpx.Response(200, stream=_ShortStream())
+    )
+    dest = tmp_path / "out.mp4"
+    with pytest.raises(DownloadError, match="size mismatch"):
+        download("https://v/m.mp4", dest, expected_size=11)
+    assert not dest.exists()
+    assert not dest.with_name("out.mp4.part").exists()
+
+
+@respx.mock
+def test_download_restarts_when_remote_total_differs(tmp_path: Path):
+    dest = tmp_path / "out.mp4"
+    part = dest.with_name("out.mp4.part")
+    part.write_bytes(b"OLDOLD")  # 6 stale bytes from a previous run
+
+    seen_ranges: list[str | None] = []
+
+    def handler(request):
+        rng = request.headers.get("range")
+        seen_ranges.append(rng)
+        if rng is not None:
+            # Resume attempt: server reports a different total (11) than the
+            # caller's expected_size (20) -> remote changed, must restart.
+            return httpx.Response(
+                206, content=b"world",
+                headers={"content-range": "bytes 6-10/11", "content-length": "5"},
+            )
+        # Restart attempt: full file from byte 0.
+        return httpx.Response(
+            200, content=b"hello world", headers={"content-length": "11"}
+        )
+
+    respx.get("https://v/m.mp4").mock(side_effect=handler)
+    download("https://v/m.mp4", dest, expected_size=20)
+
+    assert dest.read_bytes() == b"hello world"
+    assert seen_ranges == ["bytes=6-", None]  # tried resume, then restarted clean
+    assert not part.exists()

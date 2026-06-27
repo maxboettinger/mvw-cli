@@ -56,43 +56,77 @@ def download(
     *,
     on_progress: ProgressCb | None = None,
     resume: bool = True,
+    expected_size: int | None = None,
     client: httpx.Client | None = None,
 ) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
-    existing = part.stat().st_size if (resume and part.exists()) else 0
-
-    headers = {}
-    mode = "wb"
-    if existing:
-        headers["Range"] = f"bytes={existing}-"
-        mode = "ab"
 
     owns_client = client is None
     client = client or httpx.Client(timeout=60.0, follow_redirects=True)
+    downloaded = 0
+    total: int | None = None
     try:
-        with client.stream("GET", url, headers=headers) as resp:
-            if resp.status_code not in (200, 206):
-                raise DownloadError(f"HTTP {resp.status_code} downloading {url}")
-            if resp.status_code == 200:
-                existing = 0
-                mode = "wb"
-            total: int | None = None
-            cl = resp.headers.get("content-length")
-            if cl is not None:
-                total = int(cl) + existing
-            downloaded = existing
-            with open(part, mode) as fh:
-                for chunk in resp.iter_bytes():
-                    fh.write(chunk)
-                    downloaded += len(chunk)
-                    if on_progress:
-                        on_progress(downloaded, total)
+        # At most two passes: one resume attempt, then a clean restart if the
+        # server's 206 total disagrees with the known expected size.
+        for _attempt in range(2):
+            existing = part.stat().st_size if (resume and part.exists()) else 0
+            headers = {}
+            mode = "wb"
+            if existing:
+                headers["Range"] = f"bytes={existing}-"
+                mode = "ab"
+            with client.stream("GET", url, headers=headers) as resp:
+                if resp.status_code not in (200, 206):
+                    raise DownloadError(f"HTTP {resp.status_code} downloading {url}")
+                if resp.status_code == 200:
+                    # Server is sending the whole file; ignore any partial .part.
+                    existing = 0
+                    mode = "wb"
+                total = None
+                cl = resp.headers.get("content-length")
+                if cl is not None:
+                    total = int(cl) + existing
+                # Resume guard: a 206 whose total disagrees with the known
+                # expected size means the remote changed under us. Drop the
+                # stale partial and retry once from byte 0.
+                if (
+                    resp.status_code == 206
+                    and existing
+                    and expected_size
+                    and expected_size > 0
+                    and total is not None
+                    and total != expected_size
+                ):
+                    resp.close()
+                    part.unlink(missing_ok=True)
+                    resume = False
+                    continue
+                downloaded = existing
+                with open(part, mode) as fh:
+                    for chunk in resp.iter_bytes():
+                        fh.write(chunk)
+                        downloaded += len(chunk)
+                        if on_progress:
+                            on_progress(downloaded, total)
+            break
     except httpx.TransportError as exc:
         raise DownloadError(f"network error: {exc}") from exc
     finally:
         if owns_client:
             client.close()
+
+    # Completeness check: prefer the server's Content-Length total for this
+    # transfer; fall back to the API-provided expected_size. Promote .part to
+    # the final name only after this passes.
+    effective = total if total is not None else (
+        expected_size if expected_size and expected_size > 0 else None
+    )
+    if effective is not None and downloaded != effective:
+        part.unlink(missing_ok=True)
+        raise DownloadError(
+            f"size mismatch downloading {url}: got {downloaded}, expected {effective}"
+        )
 
     part.replace(dest)
     return dest
