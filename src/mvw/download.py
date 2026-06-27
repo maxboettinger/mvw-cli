@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -79,14 +81,43 @@ def download(
     return dest
 
 
-def download_hls(url: str, dest: Path, *, ffmpeg: str = "ffmpeg") -> Path:
+def download_hls(
+    url: str,
+    dest: Path,
+    *,
+    ffmpeg: str = "ffmpeg",
+    on_progress: ProgressCb | None = None,
+    poll_interval: float = 0.5,
+) -> Path:
     if shutil.which(ffmpeg) is None:
         raise FFmpegMissingError(
             "ffmpeg not found on PATH; required for HLS (.m3u8) downloads"
         )
     dest.parent.mkdir(parents=True, exist_ok=True)
     cmd = [ffmpeg, "-y", "-i", url, "-c", "copy", str(dest)]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise DownloadError(f"ffmpeg failed ({proc.returncode}): {proc.stderr[-300:]}")
+
+    def report() -> None:
+        # HLS has no known total, so report bytes written so far against an
+        # indeterminate total (None) to drive a live size/speed display.
+        if on_progress is not None:
+            try:
+                on_progress(dest.stat().st_size, None)
+            except OSError:
+                pass
+
+    # Stream ffmpeg's chatty stderr to a temp file rather than a PIPE we never
+    # read; an unread PIPE can fill its buffer and deadlock the child.
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace") as errf:
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=errf)
+        try:
+            while proc.poll() is None:
+                report()
+                time.sleep(poll_interval)
+        finally:
+            proc.wait()
+        if proc.returncode != 0:
+            errf.seek(0)
+            tail = errf.read()[-300:]
+            raise DownloadError(f"ffmpeg failed ({proc.returncode}): {tail}")
+    report()
     return dest

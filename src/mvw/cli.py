@@ -5,10 +5,11 @@ from pathlib import Path
 from typing import Optional
 
 import typer
-from rich.console import Console
+from rich.console import Console, Group
+from rich.live import Live
 from rich.progress import (
-    BarColumn, DownloadColumn, Progress, SpinnerColumn,
-    TextColumn, TransferSpeedColumn,
+    BarColumn, DownloadColumn, MofNCompleteColumn, Progress, SpinnerColumn,
+    TextColumn, TimeRemainingColumn, TransferSpeedColumn,
 )
 
 from mvw import config as configmod
@@ -151,29 +152,48 @@ def download(
     _run_downloads(plan, subtitles=subtitles)
 
 
-def _run_downloads(plan, *, subtitles: bool) -> None:
-    progress = Progress(
+def _make_progress() -> tuple[Progress, Progress, Group]:
+    """Build the download progress display.
+
+    Two separate ``Progress`` instances are used because a single ``Progress``
+    applies one column set to every task, yet the two task kinds carry different
+    units: the overall bar counts *files*, while per-file bars count *bytes*.
+    Rendering a file count through byte/speed columns produced the nonsensical
+    "10/10 bytes" / "0 bytes/s" overall display. They are stacked in a ``Group``
+    so both still render under a single ``Live``.
+    """
+    overall = Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),  # "12/78", a count — no bogus byte unit
+        TimeRemainingColumn(),
+    )
+    per_file = Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
-        DownloadColumn(),
+        DownloadColumn(),       # bytes — correct here
         TransferSpeedColumn(),
-        console=console,
     )
+    return overall, per_file, Group(overall, per_file)
+
+
+def _run_downloads(plan, *, subtitles: bool) -> None:
+    overall_progress, file_progress, group = _make_progress()
     failures = 0
     ffmpeg_missing = False
-    with progress:
-        overall = progress.add_task("Overall", total=len(plan))
+    with Live(group, console=console):
+        overall = overall_progress.add_task("Overall", total=len(plan))
         for dest, url, _tier, sub_url in plan:
-            task = progress.add_task(dest.name, total=None)
+            task = file_progress.add_task(dest.name, total=None)
 
             def cb(done: int, total, _t=task):
-                progress.update(_t, completed=done, total=total)
+                file_progress.update(_t, completed=done, total=total)
 
             try:
                 if is_hls(url):
-                    progress.update(task, description=f"{dest.name} (ffmpeg)")
-                    download_hls(url, dest)
+                    file_progress.update(task, description=f"{dest.name} (ffmpeg)")
+                    download_hls(url, dest, on_progress=cb)
                 else:
                     download_file(url, dest, on_progress=cb)
                 if subtitles and sub_url:
@@ -187,8 +207,8 @@ def _run_downloads(plan, *, subtitles: bool) -> None:
                 failures += 1
                 err_console.print(display.error_panel(f"{dest.name}: {exc}"))
             finally:
-                progress.update(task, visible=False)
-                progress.advance(overall)
+                file_progress.update(task, visible=False)
+                overall_progress.advance(overall)
     if ffmpeg_missing:
         raise typer.Exit(4)
     elif failures:
