@@ -194,8 +194,7 @@ CLI flags always override config file values, which override built-in defaults.
 | Code | Condition |
 |------|-----------|
 | 0 | Success or no results |
-| 2 | API error (non-null `err`) or HTTP error |
-| 3 | Network/timeout error after retries |
+| 2 | API error (non-null `err`), HTTP error, or network/timeout after retries |
 | 4 | HLS entry encountered but ffmpeg is not installed |
 | 5 | Partial/interrupted download failure |
 
