@@ -75,3 +75,17 @@ def test_render_bad_format_spec_raises_template_error():
 def test_render_unbalanced_brace_raises_template_error():
     with pytest.raises(TemplateError, match="invalid template"):
         render(_ep(), template="{series", tier="high", ext="mp4")
+
+
+def test_subtitle_dest_uses_url_suffix():
+    from mvw.naming import subtitle_dest
+
+    assert subtitle_dest(Path("a/b.mp4"), "https://x/y/sub.vtt") == Path("a/b.de.vtt")
+    assert subtitle_dest(Path("a/b.mp4"), "https://x/y/sub.ttml?q=1") == Path("a/b.de.ttml")
+
+
+def test_subtitle_dest_unknown_suffix_falls_back_to_ttml():
+    from mvw.naming import subtitle_dest
+
+    assert subtitle_dest(Path("a/b.mp4"), "https://x/y/sub.weird") == Path("a/b.de.ttml")
+    assert subtitle_dest(Path("a/b.mp4"), "https://x/y/sub") == Path("a/b.de.ttml")

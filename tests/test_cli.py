@@ -319,3 +319,32 @@ def test_download_rejects_invalid_resolution_from_config(monkeypatch, tmp_path):
 
 def test_traceback_locals_disabled():
     assert cli.app.pretty_exceptions_show_locals is False
+
+
+def test_download_duplicate_targets_skipped_with_warning(monkeypatch, tmp_path):
+    # Two identical titles render to the same destination path.
+    rows = [_r("Folge 1", id="a"), _r("Folge 1", id="b")]
+    monkeypatch.setattr(cli, "_make_client", lambda cfg: FakeClient(rows))
+    calls = []
+    monkeypatch.setattr(cli, "download_file", _fake_writer(calls, nbytes=11))
+    result = runner.invoke(
+        cli.app,
+        ["download", "#X", "--resolution", "medium", "--output", str(tmp_path)],
+    )
+    assert result.exit_code == 0
+    assert len(calls) == 1
+    assert "duplicate target" in result.output
+
+
+def test_download_subtitles_use_de_suffix(monkeypatch, tmp_path):
+    rows = [_r("Folge 1", url_subtitle="https://x/sub.ttml")]
+    monkeypatch.setattr(cli, "_make_client", lambda cfg: FakeClient(rows))
+    calls = []
+    monkeypatch.setattr(cli, "download_file", _fake_writer(calls, nbytes=11))
+    result = runner.invoke(
+        cli.app,
+        ["download", "#X", "--resolution", "medium", "--subtitles", "--output", str(tmp_path)],
+    )
+    assert result.exit_code == 0
+    written = sorted(p.name for p in tmp_path.rglob("*.de.ttml"))
+    assert len(written) == 1

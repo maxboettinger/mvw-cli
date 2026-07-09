@@ -224,6 +224,7 @@ def download(
 
     # Build plan: (dest_path, url, tier, subtitle_url)
     plan: list[tuple[Path, str, str, str]] = []
+    seen_dests: set[Path] = set()
     for ep in ordered:
         try:
             url, tier = pick_resolution(ep.result, pref)
@@ -237,6 +238,13 @@ def download(
             err_console.print(display.error_panel(str(exc)))
             raise typer.Exit(2) from exc
         dest = out_dir / rendered if season else out_dir / rendered.name
+        if dest in seen_dests:
+            _print_line(
+                f"[yellow]⚠[/] duplicate target {dest.name} — skipping (consider --dedup)",
+                error=True,
+            )
+            continue
+        seen_dests.add(dest)
         plan.append((dest, url, tier, ep.result.url_subtitle))
 
     if dry_run:
@@ -318,7 +326,7 @@ def _run_downloads(plan, *, subtitles: bool, force: bool = False) -> None:
                 _print_line(f"[cyan]↓[/] {dest.name} — downloaded")
                 if subtitles and sub_url:
                     try:
-                        download_file(sub_url, dest.with_suffix(".xml"))
+                        download_file(sub_url, naming.subtitle_dest(dest, sub_url))
                     except DownloadError as exc:
                         _print_line(
                             f"[yellow]⚠[/] {dest.name} (subtitle) — failed: {exc}", error=True

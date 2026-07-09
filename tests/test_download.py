@@ -251,3 +251,34 @@ def test_remote_size_none_on_network_error():
     respx.head("https://v/m.mp4").mock(side_effect=httpx.ConnectError("boom"))
     respx.get("https://v/m.mp4").mock(side_effect=httpx.ConnectError("boom"))
     assert remote_size("https://v/m.mp4") is None
+
+
+@respx.mock
+def test_download_ignores_malformed_content_length(tmp_path: Path):
+    respx.get("https://v/m.mp4").mock(
+        return_value=httpx.Response(200, content=b"data", headers={"content-length": "garbage"})
+    )
+    dest = tmp_path / "out.mp4"
+    download("https://v/m.mp4", dest)  # must not raise ValueError
+    assert dest.read_bytes() == b"data"
+
+
+def test_download_hls_stall_timeout_kills_ffmpeg(tmp_path: Path):
+    script = tmp_path / "stalling_ffmpeg"
+    script.write_text("#!/bin/sh\nsleep 30\n")  # writes nothing, would hang
+    script.chmod(0o755)
+    dest = tmp_path / "out.mkv"
+    import time
+
+    start = time.monotonic()
+    with pytest.raises(DownloadError, match="stalled"):
+        download_hls(
+            "https://x/playlist.m3u8",
+            dest,
+            ffmpeg=str(script),
+            poll_interval=0.05,
+            stall_timeout=0.3,
+        )
+    assert time.monotonic() - start < 10  # killed, did not wait for the sleep
+    assert not dest.exists()
+    assert not dest.with_name("out.mkv.part").exists()

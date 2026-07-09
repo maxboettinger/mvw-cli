@@ -125,7 +125,7 @@ def download(
                     mode = "wb"
                 total = None
                 cl = resp.headers.get("content-length")
-                if cl is not None:
+                if cl is not None and cl.isdigit():
                     total = int(cl) + existing
                 # Resume guard: a 206 whose total disagrees with the known
                 # expected size means the remote changed under us. Drop the
@@ -181,6 +181,7 @@ def download_hls(
     ffmpeg: str = "ffmpeg",
     on_progress: ProgressCb | None = None,
     poll_interval: float = 0.5,
+    stall_timeout: float = 300.0,
 ) -> Path:
     if shutil.which(ffmpeg) is None:
         raise FFmpegMissingError("ffmpeg not found on PATH; required for HLS (.m3u8) downloads")
@@ -201,10 +202,24 @@ def download_hls(
     with tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace") as errf:
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=errf)
         try:
+            last_size = -1
+            last_change = time.monotonic()
             while proc.poll() is None:
                 report()
+                size = part.stat().st_size if part.exists() else 0
+                if size != last_size:
+                    last_size = size
+                    last_change = time.monotonic()
+                elif time.monotonic() - last_change > stall_timeout:
+                    proc.kill()
+                    proc.wait()
+                    part.unlink(missing_ok=True)
+                    raise DownloadError(f"ffmpeg stalled: no data written for {stall_timeout:.0f}s")
                 time.sleep(poll_interval)
         finally:
+            # Never leave an orphaned ffmpeg behind (stall, Ctrl-C, ...).
+            if proc.poll() is None:
+                proc.kill()
             proc.wait()
         if proc.returncode != 0:
             errf.seek(0)

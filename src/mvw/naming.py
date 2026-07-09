@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from mvw.episodes import Episode, clean_episode_title
 
@@ -19,6 +20,21 @@ class TemplateError(ValueError):
 
 _ILLEGAL = re.compile(r'[/\\:*?"<>|]')
 _WS = re.compile(r"\s+")
+_SUBTITLE_SUFFIXES = {".ttml", ".xml", ".vtt", ".srt"}
+
+
+def subtitle_dest(dest: Path, sub_url: str) -> Path:
+    """Sidecar subtitle path next to the video, e.g. ``X.mp4`` -> ``X.de.ttml``.
+
+    The ``.de`` language tag is what Plex/Jellyfin parse; MVW indexes German
+    public broadcasting, so German is the only language on offer. The extension
+    follows the subtitle URL when recognizable, defaulting to TTML (the format
+    the broadcasters actually serve).
+    """
+    suffix = Path(urlsplit(sub_url).path).suffix.lower()
+    if suffix not in _SUBTITLE_SUFFIXES:
+        suffix = ".ttml"
+    return dest.with_suffix(f".de{suffix}")
 
 
 def sanitize(component: str) -> str:
