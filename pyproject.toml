@@ -52,6 +52,8 @@ Issues = "https://github.com/maxboettinger/mvw-cli/issues"
 dev = [
     "pytest>=8.2",
     "respx>=0.21",
+    "ruff>=0.5",
+    "mypy>=1.10",
 ]
 
 [build-system]
@@ -68,6 +70,25 @@ include = [
     "README.md",
     "LICENSE",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+# En/em dashes are used deliberately in user-facing strings and title-cleanup regexes.
+allowed-confusables = ["–", "—"]
+
+[tool.ruff.lint.flake8-bugbear]
+# Typer's API is call-in-default by design.
+extend-immutable-calls = ["typer.Option", "typer.Argument"]
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+warn_unused_ignores = true
+no_implicit_optional = true
 
 [tool.pytest.ini_options]
 markers = ["live: hits the real MediathekViewWeb API (opt-in)"]

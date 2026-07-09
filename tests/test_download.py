@@ -4,14 +4,30 @@ import httpx
 import pytest
 import respx
 
-from mvw.download import DownloadError, download, download_hls, is_hls, pick_resolution, remote_size, verify_size
+from mvw.download import (
+    DownloadError,
+    download,
+    download_hls,
+    is_hls,
+    pick_resolution,
+    remote_size,
+    verify_size,
+)
 from mvw.models import MediathekResult
 
 
 def _r(**over):
-    base = dict(channel="WDR", topic="T", title="x", timestamp=1, duration=1,
-                url_video="https://v/m.mp4", url_video_low="", url_video_hd="https://v/hd.mp4",
-                id="1")
+    base = dict(
+        channel="WDR",
+        topic="T",
+        title="x",
+        timestamp=1,
+        duration=1,
+        url_video="https://v/m.mp4",
+        url_video_low="",
+        url_video_hd="https://v/hd.mp4",
+        id="1",
+    )
     base.update(over)
     return MediathekResult.from_api(base)
 
@@ -78,8 +94,11 @@ def test_download_hls_reports_progress_and_writes_output(tmp_path: Path):
     seen: list[tuple[int, object]] = []
 
     result = download_hls(
-        "https://x/playlist.m3u8", dest, ffmpeg=str(ffmpeg),
-        on_progress=lambda d, t: seen.append((d, t)), poll_interval=0.1,
+        "https://x/playlist.m3u8",
+        dest,
+        ffmpeg=str(ffmpeg),
+        on_progress=lambda d, t: seen.append((d, t)),
+        poll_interval=0.1,
     )
 
     assert result == dest
@@ -143,9 +162,7 @@ class _ShortStream(httpx.SyncByteStream):
 
 @respx.mock
 def test_download_raises_when_short_of_expected_size(tmp_path: Path):
-    respx.get("https://v/m.mp4").mock(
-        return_value=httpx.Response(200, stream=_ShortStream())
-    )
+    respx.get("https://v/m.mp4").mock(return_value=httpx.Response(200, stream=_ShortStream()))
     dest = tmp_path / "out.mp4"
     with pytest.raises(DownloadError, match="size mismatch"):
         download("https://v/m.mp4", dest, expected_size=11)
@@ -168,13 +185,12 @@ def test_download_restarts_when_remote_total_differs(tmp_path: Path):
             # Resume attempt: server reports a different total (11) than the
             # caller's expected_size (20) -> remote changed, must restart.
             return httpx.Response(
-                206, content=b"world",
+                206,
+                content=b"world",
                 headers={"content-range": "bytes 6-10/11", "content-length": "5"},
             )
         # Restart attempt: full file from byte 0.
-        return httpx.Response(
-            200, content=b"hello world", headers={"content-length": "11"}
-        )
+        return httpx.Response(200, content=b"hello world", headers={"content-length": "11"})
 
     respx.get("https://v/m.mp4").mock(side_effect=handler)
     download("https://v/m.mp4", dest, expected_size=20)
@@ -193,7 +209,8 @@ def test_download_resume_continues_on_valid_206(tmp_path: Path):
     def handler(request):
         assert request.headers["range"] == "bytes=6-"
         return httpx.Response(
-            206, content=b"world",
+            206,
+            content=b"world",
             headers={"content-range": "bytes 6-10/11", "content-length": "5"},
         )
 
@@ -225,7 +242,7 @@ def test_remote_size_falls_back_to_range_when_head_unsupported():
 @respx.mock
 def test_remote_size_none_when_unknown():
     respx.head("https://v/m.mp4").mock(return_value=httpx.Response(200))  # no length
-    respx.get("https://v/m.mp4").mock(return_value=httpx.Response(200))   # ignores range
+    respx.get("https://v/m.mp4").mock(return_value=httpx.Response(200))  # ignores range
     assert remote_size("https://v/m.mp4") is None
 
 

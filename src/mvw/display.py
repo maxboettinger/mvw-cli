@@ -26,8 +26,13 @@ def results_table(results: list[MediathekResult], *, start_index: int = 1) -> Ta
     table.add_column("Res", no_wrap=True)
     for i, r in enumerate(results, start=start_index):
         table.add_row(
-            str(i), r.channel, r.topic, r.title,
-            r.aired.strftime("%Y-%m-%d"), r.duration_human, res_badges(r),
+            str(i),
+            r.channel,
+            r.topic,
+            r.title,
+            r.aired.strftime("%Y-%m-%d"),
+            r.duration_human,
+            res_badges(r),
         )
     return table
 

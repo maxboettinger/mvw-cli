@@ -14,8 +14,10 @@ def _resp(results, total):
         "result": {
             "results": results,
             "queryInfo": {
-                "totalResults": total, "resultCount": len(results),
-                "searchEngineTime": "1.0", "filmlisteTimestamp": "1",
+                "totalResults": total,
+                "resultCount": len(results),
+                "searchEngineTime": "1.0",
+                "filmlisteTimestamp": "1",
             },
         },
         "err": None,
@@ -23,9 +25,16 @@ def _resp(results, total):
 
 
 def _row(i):
-    return {"channel": "WDR", "topic": "T", "title": f"E{i}",
-            "timestamp": 1000 + i, "duration": 60, "size": 1,
-            "url_video": f"https://v/{i}.mp4", "id": str(i)}
+    return {
+        "channel": "WDR",
+        "topic": "T",
+        "title": f"E{i}",
+        "timestamp": 1000 + i,
+        "duration": 60,
+        "size": 1,
+        "url_video": f"https://v/{i}.mp4",
+        "id": str(i),
+    }
 
 
 @respx.mock

@@ -3,10 +3,22 @@ from mvw.models import MediathekResult
 
 
 def _r(title, topic="Feuer und Flamme", **over):
-    base = dict(channel="WDR", topic=topic, title=title, description="",
-                timestamp=1000, duration=2700, size=1, url_website="",
-                url_subtitle="", url_video="https://v.mp4", url_video_low="",
-                url_video_hd="", filmlisteTimestamp="", id=title)
+    base = dict(
+        channel="WDR",
+        topic=topic,
+        title=title,
+        description="",
+        timestamp=1000,
+        duration=2700,
+        size=1,
+        url_website="",
+        url_subtitle="",
+        url_video="https://v.mp4",
+        url_video_low="",
+        url_video_hd="",
+        filmlisteTimestamp="",
+        id=title,
+    )
     base.update(over)
     return MediathekResult.from_api(base)
 
@@ -23,7 +35,7 @@ def test_normalize_strips_variant_markers():
 
 
 def test_dedup_keeps_best_copy():
-    plain = _r("Folge 5", url_video_hd="")          # 1 resolution
+    plain = _r("Folge 5", url_video_hd="")  # 1 resolution
     hd = _r("Folge 5 (Audiodeskription)", url_video_hd="https://hd.mp4")  # 2 resolutions, dup title
     out = dedup([plain, hd])
     assert len(out) == 1

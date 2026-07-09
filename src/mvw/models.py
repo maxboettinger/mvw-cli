@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 _TIER_TO_FIELD = {"high": "url_video_hd", "medium": "url_video", "low": "url_video_low"}
 _FALLBACK_ORDER = {
@@ -30,7 +30,7 @@ class MediathekResult:
     id: str
 
     @classmethod
-    def from_api(cls, d: dict) -> "MediathekResult":
+    def from_api(cls, d: dict) -> MediathekResult:
         g = d.get
         return cls(
             channel=g("channel", "") or "",
@@ -51,7 +51,7 @@ class MediathekResult:
 
     @property
     def aired(self) -> datetime:
-        return datetime.fromtimestamp(self.timestamp, tz=timezone.utc)
+        return datetime.fromtimestamp(self.timestamp, tz=UTC)
 
     @property
     def duration_human(self) -> str:
@@ -94,7 +94,7 @@ class QueryInfo:
     filmliste_timestamp: str
 
     @classmethod
-    def from_api(cls, d: dict) -> "QueryInfo":
+    def from_api(cls, d: dict) -> QueryInfo:
         return cls(
             total_results=int(d.get("totalResults", 0) or 0),
             result_count=int(d.get("resultCount", 0) or 0),

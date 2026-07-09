@@ -2,13 +2,20 @@ from pathlib import Path
 
 from mvw.episodes import Episode
 from mvw.models import MediathekResult
-from mvw.naming import DEFAULT_TEMPLATE, render, sanitize
+from mvw.naming import render, sanitize
 
 
 def _ep(title="Einsatz in Bochum (S07/E05)", topic="Feuer und Flamme"):
     r = MediathekResult.from_api(
-        {"channel": "WDR", "topic": topic, "title": title,
-         "timestamp": 1568707200, "duration": 60, "url_video": "https://v.mp4", "id": "x"}
+        {
+            "channel": "WDR",
+            "topic": topic,
+            "title": title,
+            "timestamp": 1568707200,
+            "duration": 60,
+            "url_video": "https://v.mp4",
+            "id": "x",
+        }
     )
     return Episode(result=r, season=7, episode=5)
 
@@ -34,12 +41,9 @@ def test_render_custom_template():
 
 def test_render_prevents_path_injection_in_token_values():
     """Slashes in series/title must not create extra directory levels."""
-    ep = _ep(
-        title="Berlin/Köln (S01/E03)",
-        topic="Tatort: Köln/Bonn"
-    )
+    ep = _ep(title="Berlin/Köln (S01/E03)", topic="Tatort: Köln/Bonn")
     p = render(ep, tier="high", ext="mp4")
-    # With the default template "{series} ({year})/Season {s:02d}/{series} ({year}) - s{s:02d}e{e:02d} - {ep_title} [{res}].{ext}",
+    # With the default template ("{series} ({year})/Season {s:02d}/..."),
     # we expect exactly 3 parts after split: [series_dir, season_dir, filename]
     # If slashes were NOT scrubbed, we'd get extra parts like ["Tatort: Köln", "Bonn", ...]
     assert len(p.parts) == 3

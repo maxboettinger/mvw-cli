@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import contextlib
 import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import httpx
 
@@ -84,7 +85,7 @@ def remote_size(url: str, *, client: httpx.Client | None = None) -> int | None:
 
 def pick_resolution(result: MediathekResult, preference: str) -> tuple[str, str]:
     url, tier = result.resolve_video(preference)
-    if not url:
+    if not url or not tier:
         raise DownloadError("no video URL available for this entry")
     return url, tier
 
@@ -158,8 +159,10 @@ def download(
     # Completeness check: prefer the server's Content-Length total for this
     # transfer; fall back to the API-provided expected_size. Promote .part to
     # the final name only after this passes.
-    effective = total if total is not None else (
-        expected_size if expected_size and expected_size > 0 else None
+    effective = (
+        total
+        if total is not None
+        else (expected_size if expected_size and expected_size > 0 else None)
     )
     if effective is not None and downloaded != effective:
         part.unlink(missing_ok=True)
@@ -180,9 +183,7 @@ def download_hls(
     poll_interval: float = 0.5,
 ) -> Path:
     if shutil.which(ffmpeg) is None:
-        raise FFmpegMissingError(
-            "ffmpeg not found on PATH; required for HLS (.m3u8) downloads"
-        )
+        raise FFmpegMissingError("ffmpeg not found on PATH; required for HLS (.m3u8) downloads")
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
     part.unlink(missing_ok=True)
@@ -192,10 +193,8 @@ def download_hls(
         # HLS has no known total, so report bytes written so far against an
         # indeterminate total (None) to drive a live size/speed display.
         if on_progress is not None:
-            try:
+            with contextlib.suppress(OSError):
                 on_progress(part.stat().st_size, None)
-            except OSError:
-                pass
 
     # Stream ffmpeg's chatty stderr to a temp file rather than a PIPE we never
     # read; an unread PIPE can fill its buffer and deadlock the child.

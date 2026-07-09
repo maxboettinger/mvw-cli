@@ -63,4 +63,4 @@ def latest_season(results: list[MediathekResult]) -> list[MediathekResult]:
     if not detected:
         return list(results)
     top = max(detected)
-    return [r for r, s in zip(results, seasons) if s == top]
+    return [r for r, s in zip(results, seasons, strict=True) if s == top]

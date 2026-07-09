@@ -22,9 +22,7 @@ def sanitize(component: str) -> str:
     return s[:150]
 
 
-def render(
-    episode: Episode, *, template: str = DEFAULT_TEMPLATE, tier: str, ext: str
-) -> Path:
+def render(episode: Episode, *, template: str = DEFAULT_TEMPLATE, tier: str, ext: str) -> Path:
     r = episode.result
     values = {
         "series": r.topic,
@@ -39,9 +37,10 @@ def render(
     }
     # Scrub path separators from string values to prevent path injection.
     # Integers (year, s, e) are left unchanged to preserve format specs like :02d.
-    for key in ["series", "ep_title", "res", "channel", "date", "ext"]:
-        if isinstance(values[key], str):
-            values[key] = values[key].replace("/", " ").replace("\\", " ")
+    for key in ("series", "ep_title", "res", "channel", "date", "ext"):
+        value = values[key]
+        if isinstance(value, str):
+            values[key] = value.replace("/", " ").replace("\\", " ")
     rendered = template.format(**values)
     parts = [sanitize(p) for p in rendered.split("/") if p]
     return Path(*parts)

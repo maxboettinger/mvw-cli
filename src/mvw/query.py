@@ -40,7 +40,7 @@ def parse_raw(raw: str) -> tuple[list[dict], int | None, int | None]:
                     # Stop if next token is a prefix or duration
                     if next_head in _PREFIX_FIELD and len(next_token) > 1:
                         break
-                    if next_head in ('>', '<') and len(next_token) > 1 and next_token[1:].isdigit():
+                    if next_head in (">", "<") and len(next_token) > 1 and next_token[1:].isdigit():
                         break
                     # This bare token follows topic prefix, collect it
                     values.append(next_token)
@@ -79,8 +79,10 @@ def build_payload(
         queries, dur_min, dur_max = parse_raw(raw)
 
     for field, value in (
-        ("channel", channel), ("topic", topic),
-        ("title", title), ("description", description),
+        ("channel", channel),
+        ("topic", topic),
+        ("title", title),
+        ("description", description),
     ):
         if value:
             queries.append({"fields": [field], "query": value})
