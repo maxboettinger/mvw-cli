@@ -281,3 +281,41 @@ def test_download_invalid_template_exits_2(monkeypatch, tmp_path):
     )
     assert result.exit_code == 2
     assert "template" in result.output
+
+
+def test_version_flag():
+    result = runner.invoke(cli.app, ["--version"])
+    assert result.exit_code == 0
+    assert "mvw " in result.output
+
+
+def test_search_rejects_invalid_sort():
+    result = runner.invoke(cli.app, ["search", "#X", "--sort", "bogus"])
+    assert result.exit_code != 0
+
+
+def test_search_rejects_invalid_order():
+    result = runner.invoke(cli.app, ["search", "#X", "--order", "sideways"])
+    assert result.exit_code != 0
+
+
+def test_download_rejects_invalid_resolution_flag(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "_make_client", lambda cfg: FakeClient([_r("Folge 1")]))
+    result = runner.invoke(
+        cli.app, ["download", "#X", "--resolution", "ultra", "--output", str(tmp_path)]
+    )
+    assert result.exit_code != 0
+
+
+def test_download_rejects_invalid_resolution_from_config(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "_make_client", lambda cfg: FakeClient([_r("Folge 1")]))
+    monkeypatch.setattr(
+        cli, "_load_config", lambda: {**cli.configmod.DEFAULTS, "resolution": "ultra"}
+    )
+    result = runner.invoke(cli.app, ["download", "#X", "--output", str(tmp_path)])
+    assert result.exit_code == 2
+    assert "resolution" in result.output
+
+
+def test_traceback_locals_disabled():
+    assert cli.app.pretty_exceptions_show_locals is False

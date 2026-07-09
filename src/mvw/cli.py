@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json as jsonlib
+from enum import StrEnum
 from pathlib import Path
 
 import typer
@@ -17,8 +18,8 @@ from rich.progress import (
     TransferSpeedColumn,
 )
 
+from mvw import __version__, display, episodes, filters, naming, query
 from mvw import config as configmod
-from mvw import display, episodes, filters, naming, query
 from mvw.api import MediathekClient, MediathekError
 from mvw.download import (
     DownloadError,
@@ -33,9 +34,51 @@ from mvw.download import (
     download as download_file,
 )
 
-app = typer.Typer(help="Search and download from MediathekViewWeb.", no_args_is_help=True)
+app = typer.Typer(
+    help="Search and download from MediathekViewWeb.",
+    no_args_is_help=True,
+    pretty_exceptions_show_locals=False,
+)
 console = Console()
 err_console = Console(stderr=True)
+
+
+class SortField(StrEnum):
+    timestamp = "timestamp"
+    duration = "duration"
+    channel = "channel"
+
+
+class SortOrder(StrEnum):
+    asc = "asc"
+    desc = "desc"
+
+
+class Resolution(StrEnum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+    best = "best"
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(f"mvw {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the version and exit.",
+    ),
+) -> None:
+    """Search and download from MediathekViewWeb."""
 
 
 def _load_config() -> dict:
@@ -59,8 +102,8 @@ def search(
     description: str | None = typer.Option(None, "--description"),
     min_duration: int | None = typer.Option(None, "--min-duration", help="minutes"),
     max_duration: int | None = typer.Option(None, "--max-duration", help="minutes"),
-    sort: str = typer.Option("timestamp", "--sort"),
-    order: str = typer.Option("desc", "--order"),
+    sort: SortField = typer.Option(SortField.timestamp, "--sort"),
+    order: SortOrder = typer.Option(SortOrder.desc, "--order"),
     future: bool = typer.Option(False, "--future"),
     limit: int = typer.Option(15, "--limit"),
     offset: int = typer.Option(0, "--offset"),
@@ -75,8 +118,8 @@ def search(
         description=description,
         min_duration=min_duration,
         max_duration=max_duration,
-        sort_by=sort,
-        sort_order=order,
+        sort_by=sort.value,
+        sort_order=order.value,
         future=future,
         offset=offset,
         size=limit,
@@ -115,7 +158,7 @@ def download(
     max_duration: int | None = typer.Option(None, "--max-duration", help="minutes"),
     season: bool = typer.Option(False, "--season", help="group into Plex season folders"),
     dry_run: bool = typer.Option(False, "--dry-run"),
-    resolution: str | None = typer.Option(None, "--resolution"),
+    resolution: Resolution | None = typer.Option(None, "--resolution"),
     output: Path | None = typer.Option(None, "--output", "-o"),
     template: str | None = typer.Option(None, "--template"),
     exclude: list[str] = typer.Option([], "--exclude", help="regex (repeatable)"),
@@ -127,9 +170,17 @@ def download(
     limit: int = typer.Option(200, "--limit", help="max entries to resolve"),
 ) -> None:
     cfg = _load_config()
-    pref = resolution or cfg["resolution"]
+    pref = resolution.value if resolution else str(cfg["resolution"])
     tmpl = template or cfg["template"]
     out_dir = output or Path(cfg["download_dir"])
+
+    # The flag is enum-validated by typer; the config value is free text.
+    if pref not in Resolution.__members__:
+        valid = ", ".join(Resolution.__members__)
+        err_console.print(
+            display.error_panel(f"invalid resolution {pref!r} (from config); valid: {valid}")
+        )
+        raise typer.Exit(2)
 
     # Validate user-supplied patterns before any network round trip.
     try:

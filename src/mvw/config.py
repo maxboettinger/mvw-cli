@@ -5,13 +5,14 @@ from pathlib import Path
 
 import platformdirs
 
+from mvw import __version__
 from mvw.naming import DEFAULT_TEMPLATE
 
 DEFAULTS: dict = {
     "download_dir": ".",
     "template": DEFAULT_TEMPLATE,
     "resolution": "best",
-    "user_agent": "mvw/0.1.0",
+    "user_agent": f"mvw/{__version__}",
     "page_size": 50,
     "request_timeout": 30.0,
 }

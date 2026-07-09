@@ -45,3 +45,9 @@ def test_set_value_on_corrupt_file_raises(tmp_path):
     p.write_text("not = = valid")
     with pytest.raises(ConfigError, match=r"config\.toml"):
         set_value("resolution", "high", p)
+
+
+def test_default_user_agent_tracks_package_version():
+    import mvw
+
+    assert DEFAULTS["user_agent"] == f"mvw/{mvw.__version__}"
