@@ -131,6 +131,13 @@ def download(
     tmpl = template or cfg["template"]
     out_dir = output or Path(cfg["download_dir"])
 
+    # Validate user-supplied patterns before any network round trip.
+    try:
+        filters.compile_patterns(exclude)
+    except ValueError as exc:
+        err_console.print(display.error_panel(str(exc)))
+        raise typer.Exit(2) from exc
+
     payload = query.build_payload(
         query_str or None,
         channel=channel,
@@ -173,7 +180,11 @@ def download(
             err_console.print(display.error_panel(f"{ep.result.title}: {exc}"))
             continue
         ext = "mp4"
-        rendered = naming.render(ep, template=tmpl, tier=tier, ext=ext)
+        try:
+            rendered = naming.render(ep, template=tmpl, tier=tier, ext=ext)
+        except naming.TemplateError as exc:
+            err_console.print(display.error_panel(str(exc)))
+            raise typer.Exit(2) from exc
         dest = out_dir / rendered if season else out_dir / rendered.name
         plan.append((dest, url, tier, ep.result.url_subtitle))
 

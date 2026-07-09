@@ -10,6 +10,12 @@ DEFAULT_TEMPLATE = (
     "{series} ({year}) - s{s:02d}e{e:02d} - {ep_title} [{res}].{ext}"
 )
 RES_LABELS = {"high": "1080p", "medium": "720p", "low": "480p"}
+TEMPLATE_TOKENS = ("series", "year", "s", "e", "ep_title", "res", "channel", "date", "ext")
+
+
+class TemplateError(ValueError):
+    """User-supplied filename template is invalid; the message is user-facing."""
+
 
 _ILLEGAL = re.compile(r'[/\\:*?"<>|]')
 _WS = re.compile(r"\s+")
@@ -41,6 +47,14 @@ def render(episode: Episode, *, template: str = DEFAULT_TEMPLATE, tier: str, ext
         value = values[key]
         if isinstance(value, str):
             values[key] = value.replace("/", " ").replace("\\", " ")
-    rendered = template.format(**values)
+    try:
+        rendered = template.format(**values)
+    except KeyError as exc:
+        valid = ", ".join("{" + t + "}" for t in TEMPLATE_TOKENS)
+        raise TemplateError(
+            f"unknown template token {{{exc.args[0]}}}; valid tokens: {valid}"
+        ) from exc
+    except (ValueError, IndexError) as exc:
+        raise TemplateError(f"invalid template {template!r}: {exc}") from exc
     parts = [sanitize(p) for p in rendered.split("/") if p]
     return Path(*parts)

@@ -1,8 +1,10 @@
 from pathlib import Path
 
+import pytest
+
 from mvw.episodes import Episode
 from mvw.models import MediathekResult
-from mvw.naming import render, sanitize
+from mvw.naming import TemplateError, render, sanitize
 
 
 def _ep(title="Einsatz in Bochum (S07/E05)", topic="Feuer und Flamme"):
@@ -53,3 +55,23 @@ def test_render_prevents_path_injection_in_token_values():
     assert "Season 07" in p.parts[1]
     # The filename should contain the scrubbed episode title (spaces instead of slashes)
     assert "Berlin" in p.parts[2] and "Köln" in p.parts[2]
+
+
+def test_render_unknown_token_raises_template_error():
+    with pytest.raises(TemplateError, match=r"\{serie\}"):
+        render(_ep(), template="{serie}.{ext}", tier="high", ext="mp4")
+
+
+def test_render_unknown_token_message_lists_valid_tokens():
+    with pytest.raises(TemplateError, match=r"\{ep_title\}"):
+        render(_ep(), template="{nope}", tier="high", ext="mp4")
+
+
+def test_render_bad_format_spec_raises_template_error():
+    with pytest.raises(TemplateError, match="invalid template"):
+        render(_ep(), template="{s:02z}.{ext}", tier="high", ext="mp4")
+
+
+def test_render_unbalanced_brace_raises_template_error():
+    with pytest.raises(TemplateError, match="invalid template"):
+        render(_ep(), template="{series", tier="high", ext="mp4")

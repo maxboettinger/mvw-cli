@@ -261,3 +261,23 @@ def test_corrupt_config_file_exits_2(monkeypatch, tmp_path):
     result = runner.invoke(cli.app, ["config", "show"])
     assert result.exit_code == 2
     assert "config.toml" in result.output
+
+
+def test_download_invalid_exclude_regex_exits_2(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "_make_client", lambda cfg: FakeClient([_r("Folge 1")]))
+    result = runner.invoke(
+        cli.app,
+        ["download", "#X", "--exclude", "[invalid", "--output", str(tmp_path)],
+    )
+    assert result.exit_code == 2
+    assert "invalid regex" in result.output
+
+
+def test_download_invalid_template_exits_2(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "_make_client", lambda cfg: FakeClient([_r("Folge 1")]))
+    result = runner.invoke(
+        cli.app,
+        ["download", "#X", "--template", "{nope}.{ext}", "--output", str(tmp_path)],
+    )
+    assert result.exit_code == 2
+    assert "template" in result.output
