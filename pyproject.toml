@@ -47,6 +47,7 @@ mvw-cli = "mvw.cli:app"
 Homepage = "https://github.com/maxboettinger/mvw-cli"
 Repository = "https://github.com/maxboettinger/mvw-cli"
 Issues = "https://github.com/maxboettinger/mvw-cli/issues"
+Changelog = "https://github.com/maxboettinger/mvw-cli/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
@@ -68,6 +69,7 @@ include = [
     "src/mvw",
     "tests",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
 ]
 

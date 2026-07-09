@@ -1,5 +1,9 @@
 # mvw
 
+[![CI](https://github.com/maxboettinger/mvw-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/maxboettinger/mvw-cli/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/mvw-cli)](https://pypi.org/project/mvw-cli/)
+[![Python](https://img.shields.io/pypi/pyversions/mvw-cli)](https://pypi.org/project/mvw-cli/)
+
 A command-line tool for searching and downloading content from
 [MediathekViewWeb](https://mediathekviewweb.de/) (MVW), the index of German
 public-broadcasting media libraries (ARD, ZDF, WDR, and more). Built for
@@ -8,7 +12,7 @@ downloads.
 
 ## Install
 
-Requires Python ≥ 3.13. The distribution is published as **`mvw-cli`** (the
+Requires Python ≥ 3.11. The distribution is published as **`mvw-cli`** (the
 PyPI name `mvw` was already taken); the installed command is `mvw`.
 
 Install as a standalone tool with [uv](https://github.com/astral-sh/uv):
@@ -114,7 +118,7 @@ mvw download QUERY
              [--resolution low|medium|high|best]
              [--output DIR] [-o DIR] [--template STR]
              [--exclude TERM ...] [--dedup] [--latest-season]
-             [--season-number N] [--subtitles] [--limit N]
+             [--season-number N] [--subtitles] [--force] [--limit N]
 ```
 
 | Option | Default | Description |
@@ -133,7 +137,7 @@ mvw download QUERY
 | `--dedup` | off | Remove near-duplicate entries, keeping the highest-quality copy |
 | `--latest-season` | off | Keep only entries from the highest detected season |
 | `--season-number` | — | Override detected season number |
-| `--subtitles` | off | Also fetch subtitle files alongside each video |
+| `--subtitles` | off | Also fetch subtitles, saved as `<video>.de.<ext>` sidecars |
 | `--limit` | 200 | Maximum number of entries to resolve |
 | `--force` | off | Redownload every matched entry even if a valid file already exists |
 
@@ -175,6 +179,12 @@ Override with `--template`. Available tokens:
 | `{channel}` | Broadcaster |
 | `{date}` | Broadcast date (`YYYY-MM-DD`) |
 | `{ext}` | File extension |
+
+Season/episode numbers are parsed from titles (`S07/E05`, `Staffel 7 …
+Folge 5`, `Folge 5`, trailing `(5)`); entries without a parseable season fall
+back to their broadcast year. Entries with **no broadcast date at all** land in
+`Season 00` (Plex's "Specials") with `{year}` and `{date}` rendered as
+`unknown` — not the epoch year 1970.
 
 **`{res}` label note:** MVW exposes only three tiers (`low` / `medium` / `high`),
 not measured pixel heights. The `{res}` token maps these to conventional labels —
@@ -230,34 +240,21 @@ Available keys: `download_dir`, `template`, `resolution`, `user_agent`,
 
 CLI flags always override config file values, which override built-in defaults.
 
+### `mvw --version`
+
+Print the installed version (`-V` for short).
+
 ## Exit codes
 
 | Code | Condition |
 |------|-----------|
 | 0 | Success or no results |
-| 2 | API error (non-null `err`), HTTP error, or network/timeout after retries |
+| 2 | Invalid input or config (bad template, regex, config file/key/value), API error, HTTP error, or network failure after retries |
 | 4 | HLS entry encountered but ffmpeg is not installed |
 | 5 | Partial/interrupted download failure |
 
-## Releasing
+## Contributing and releasing
 
-Cutting a release is one command. It verifies the tree is clean and in sync,
-runs the tests, bumps the version, commits, tags, and pushes — and the pushed
-tag triggers the GitHub Actions workflow that publishes to PyPI via Trusted
-Publishing.
-
-```bash
-scripts/release.sh            # patch bump (default): 0.1.0 → 0.1.1
-scripts/release.sh minor      # 0.1.0 → 0.2.0
-scripts/release.sh major      # 0.1.0 → 1.0.0
-```
-
-## Running tests
-
-```bash
-# Unit and mocked tests (default)
-uv run pytest -q
-
-# Include the live API test (requires network access)
-uv run pytest -m live tests/test_live.py -v
-```
+Development setup, quality checks, and the release process are documented in
+[CONTRIBUTING.md](CONTRIBUTING.md). Notable changes are tracked in
+[CHANGELOG.md](CHANGELOG.md).
