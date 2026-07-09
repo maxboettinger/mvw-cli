@@ -66,6 +66,17 @@ jobs:
     needs: [lint, test, coverage]
     runs-on: ubuntu-latest
     steps:
-      - name: Fail if any dependency failed
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
-        run: exit 1
+      # `if: always()` on the step too: without it, a cancelled run skips the
+      # step (implicit success() is false) and the job succeeds vacuously.
+      # Fail closed: anything but "success" from every dependency is a failure.
+      - name: Require every dependency job to have succeeded
+        if: always()
+        run: |
+          results='${{ join(needs.*.result, ' ') }}'
+          echo "dependency results: $results"
+          for r in $results; do
+            if [ "$r" != "success" ]; then
+              echo "::error::a required job finished with result '$r'"
+              exit 1
+            fi
+          done
