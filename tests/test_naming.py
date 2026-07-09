@@ -89,3 +89,22 @@ def test_subtitle_dest_unknown_suffix_falls_back_to_ttml():
 
     assert subtitle_dest(Path("a/b.mp4"), "https://x/y/sub.weird") == Path("a/b.de.ttml")
     assert subtitle_dest(Path("a/b.mp4"), "https://x/y/sub") == Path("a/b.de.ttml")
+
+
+def test_render_missing_timestamp_uses_unknown_year():
+    r = MediathekResult.from_api(
+        {"channel": "WDR", "topic": "T", "title": "x", "timestamp": 0, "url_video": "u", "id": "1"}
+    )
+    ep = Episode(result=r, season=0, episode=1)
+    p = render(ep, tier="high", ext="mp4")
+    assert "unknown" in str(p)
+    assert "1970" not in str(p)
+
+
+def test_render_missing_timestamp_date_token_unknown():
+    r = MediathekResult.from_api(
+        {"channel": "WDR", "topic": "T", "title": "x", "timestamp": 0, "url_video": "u", "id": "1"}
+    )
+    ep = Episode(result=r, season=0, episode=1)
+    p = render(ep, template="{date}.{ext}", tier="high", ext="mp4")
+    assert p == Path("unknown.mp4")

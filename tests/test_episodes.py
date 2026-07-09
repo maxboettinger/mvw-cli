@@ -48,3 +48,13 @@ def test_group_by_season_sorted():
     grouped = group_by_season(eps)
     assert list(grouped.keys()) == [6, 7]
     assert [e.episode for e in grouped[7]] == [1, 2]
+
+
+def test_assign_missing_timestamp_lands_in_season_zero():
+    eps = assign([_r("Ohne Datum", ts=0)])
+    assert eps[0].season == 0  # Plex "Specials", not 1970
+
+
+def test_assign_missing_timestamp_explicit_season_wins():
+    eps = assign([_r("S03E01 Titel", ts=0)])
+    assert eps[0].season == 3

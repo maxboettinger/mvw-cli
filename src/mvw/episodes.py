@@ -54,7 +54,9 @@ def assign(results: list[MediathekResult], *, season_override: int | None = None
             return season_override
         if s is not None:
             return s
-        return r.aired.year
+        # No parsed season and no broadcast date: Season 00 (Plex "Specials")
+        # instead of the misleading epoch year 1970.
+        return r.aired.year if r.timestamp > 0 else 0
 
     enriched = [(r, season_of(r, s), e) for (r, s, e) in parsed]
 

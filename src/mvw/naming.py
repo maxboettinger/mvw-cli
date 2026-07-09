@@ -46,15 +46,18 @@ def sanitize(component: str) -> str:
 
 def render(episode: Episode, *, template: str = DEFAULT_TEMPLATE, tier: str, ext: str) -> Path:
     r = episode.result
-    values = {
+    # A zero timestamp means "no broadcast date": render "unknown" rather than
+    # the misleading epoch values 1970 / 1970-01-01.
+    dated = r.timestamp > 0
+    values: dict[str, str | int] = {
         "series": r.topic,
-        "year": r.aired.year,
+        "year": r.aired.year if dated else "unknown",
         "s": episode.season,
         "e": episode.episode,
         "ep_title": clean_episode_title(r.title),
         "res": RES_LABELS.get(tier, tier),
         "channel": r.channel,
-        "date": r.aired.strftime("%Y-%m-%d"),
+        "date": r.aired.strftime("%Y-%m-%d") if dated else "unknown",
         "ext": ext,
     }
     # Scrub path separators from string values to prevent path injection.
