@@ -4,8 +4,15 @@ from mvw.models import MediathekResult
 
 def _r(title, ts=1568707200):  # 2019-09-17
     return MediathekResult.from_api(
-        {"channel": "WDR", "topic": "Feuer und Flamme", "title": title,
-         "timestamp": ts, "duration": 60, "url_video": "https://v.mp4", "id": title}
+        {
+            "channel": "WDR",
+            "topic": "Feuer und Flamme",
+            "title": title,
+            "timestamp": ts,
+            "duration": 60,
+            "url_video": "https://v.mp4",
+            "id": title,
+        }
     )
 
 
@@ -18,13 +25,17 @@ def test_parse_se_patterns():
 
 
 def test_assign_uses_explicit_then_year_and_order():
-    rows = [_r("Folge 2", ts=1568707200), _r("Folge 1", ts=1568707100), _r("Ohne Nummer", ts=1568707300)]
+    rows = [
+        _r("Folge 2", ts=1568707200),
+        _r("Folge 1", ts=1568707100),
+        _r("Ohne Nummer", ts=1568707300),
+    ]
     eps = assign(rows)
     by_title = {e.result.title: e for e in eps}
     assert by_title["Folge 1"].episode == 1
     assert by_title["Folge 2"].episode == 2
-    assert by_title["Ohne Nummer"].episode == 3   # next free in date order
-    assert all(e.season == 2019 for e in eps)      # year fallback
+    assert by_title["Ohne Nummer"].episode == 3  # next free in date order
+    assert all(e.season == 2019 for e in eps)  # year fallback
 
 
 def test_season_override():
@@ -37,3 +48,13 @@ def test_group_by_season_sorted():
     grouped = group_by_season(eps)
     assert list(grouped.keys()) == [6, 7]
     assert [e.episode for e in grouped[7]] == [1, 2]
+
+
+def test_assign_missing_timestamp_lands_in_season_zero():
+    eps = assign([_r("Ohne Datum", ts=0)])
+    assert eps[0].season == 0  # Plex "Specials", not 1970
+
+
+def test_assign_missing_timestamp_explicit_season_wins():
+    eps = assign([_r("S03E01 Titel", ts=0)])
+    assert eps[0].season == 3

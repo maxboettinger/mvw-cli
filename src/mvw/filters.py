@@ -22,10 +22,21 @@ def normalize_title(title: str) -> str:
     return _WS.sub(" ", t).strip()
 
 
+def compile_patterns(patterns: list[str]) -> list[re.Pattern[str]]:
+    """Compile --exclude regexes, raising ValueError with a user-facing message."""
+    compiled = []
+    for p in patterns:
+        try:
+            compiled.append(re.compile(p, re.IGNORECASE))
+        except re.error as exc:
+            raise ValueError(f"invalid regex {p!r}: {exc}") from exc
+    return compiled
+
+
 def exclude(results: list[MediathekResult], patterns: list[str]) -> list[MediathekResult]:
     if not patterns:
         return list(results)
-    compiled = [re.compile(p, re.IGNORECASE) for p in patterns]
+    compiled = compile_patterns(patterns)
     kept = []
     for r in results:
         haystack = f"{r.title}\n{r.topic}\n{r.description}"
@@ -63,4 +74,4 @@ def latest_season(results: list[MediathekResult]) -> list[MediathekResult]:
     if not detected:
         return list(results)
     top = max(detected)
-    return [r for r, s in zip(results, seasons) if s == top]
+    return [r for r, s in zip(results, seasons, strict=True) if s == top]

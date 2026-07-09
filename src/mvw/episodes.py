@@ -45,9 +45,7 @@ class Episode:
     episode: int
 
 
-def assign(
-    results: list[MediathekResult], *, season_override: int | None = None
-) -> list[Episode]:
+def assign(results: list[MediathekResult], *, season_override: int | None = None) -> list[Episode]:
     parsed = [(r, *parse_se(r.title)) for r in results]
 
     # Resolve each row's season first.
@@ -56,7 +54,9 @@ def assign(
             return season_override
         if s is not None:
             return s
-        return r.aired.year
+        # No parsed season and no broadcast date: Season 00 (Plex "Specials")
+        # instead of the misleading epoch year 1970.
+        return r.aired.year if r.timestamp > 0 else 0
 
     enriched = [(r, season_of(r, s), e) for (r, s, e) in parsed]
 
@@ -88,7 +88,4 @@ def group_by_season(episodes: list[Episode]) -> dict[int, list[Episode]]:
     grouped: dict[int, list[Episode]] = {}
     for ep in episodes:
         grouped.setdefault(ep.season, []).append(ep)
-    return {
-        season: sorted(grouped[season], key=lambda e: e.episode)
-        for season in sorted(grouped)
-    }
+    return {season: sorted(grouped[season], key=lambda e: e.episode) for season in sorted(grouped)}

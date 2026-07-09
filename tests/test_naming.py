@@ -1,14 +1,23 @@
 from pathlib import Path
 
+import pytest
+
 from mvw.episodes import Episode
 from mvw.models import MediathekResult
-from mvw.naming import DEFAULT_TEMPLATE, render, sanitize
+from mvw.naming import TemplateError, render, sanitize
 
 
 def _ep(title="Einsatz in Bochum (S07/E05)", topic="Feuer und Flamme"):
     r = MediathekResult.from_api(
-        {"channel": "WDR", "topic": topic, "title": title,
-         "timestamp": 1568707200, "duration": 60, "url_video": "https://v.mp4", "id": "x"}
+        {
+            "channel": "WDR",
+            "topic": topic,
+            "title": title,
+            "timestamp": 1568707200,
+            "duration": 60,
+            "url_video": "https://v.mp4",
+            "id": "x",
+        }
     )
     return Episode(result=r, season=7, episode=5)
 
@@ -34,12 +43,9 @@ def test_render_custom_template():
 
 def test_render_prevents_path_injection_in_token_values():
     """Slashes in series/title must not create extra directory levels."""
-    ep = _ep(
-        title="Berlin/Köln (S01/E03)",
-        topic="Tatort: Köln/Bonn"
-    )
+    ep = _ep(title="Berlin/Köln (S01/E03)", topic="Tatort: Köln/Bonn")
     p = render(ep, tier="high", ext="mp4")
-    # With the default template "{series} ({year})/Season {s:02d}/{series} ({year}) - s{s:02d}e{e:02d} - {ep_title} [{res}].{ext}",
+    # With the default template ("{series} ({year})/Season {s:02d}/..."),
     # we expect exactly 3 parts after split: [series_dir, season_dir, filename]
     # If slashes were NOT scrubbed, we'd get extra parts like ["Tatort: Köln", "Bonn", ...]
     assert len(p.parts) == 3
@@ -49,3 +55,56 @@ def test_render_prevents_path_injection_in_token_values():
     assert "Season 07" in p.parts[1]
     # The filename should contain the scrubbed episode title (spaces instead of slashes)
     assert "Berlin" in p.parts[2] and "Köln" in p.parts[2]
+
+
+def test_render_unknown_token_raises_template_error():
+    with pytest.raises(TemplateError, match=r"\{serie\}"):
+        render(_ep(), template="{serie}.{ext}", tier="high", ext="mp4")
+
+
+def test_render_unknown_token_message_lists_valid_tokens():
+    with pytest.raises(TemplateError, match=r"\{ep_title\}"):
+        render(_ep(), template="{nope}", tier="high", ext="mp4")
+
+
+def test_render_bad_format_spec_raises_template_error():
+    with pytest.raises(TemplateError, match="invalid template"):
+        render(_ep(), template="{s:02z}.{ext}", tier="high", ext="mp4")
+
+
+def test_render_unbalanced_brace_raises_template_error():
+    with pytest.raises(TemplateError, match="invalid template"):
+        render(_ep(), template="{series", tier="high", ext="mp4")
+
+
+def test_subtitle_dest_uses_url_suffix():
+    from mvw.naming import subtitle_dest
+
+    assert subtitle_dest(Path("a/b.mp4"), "https://x/y/sub.vtt") == Path("a/b.de.vtt")
+    assert subtitle_dest(Path("a/b.mp4"), "https://x/y/sub.ttml?q=1") == Path("a/b.de.ttml")
+
+
+def test_subtitle_dest_unknown_suffix_falls_back_to_ttml():
+    from mvw.naming import subtitle_dest
+
+    assert subtitle_dest(Path("a/b.mp4"), "https://x/y/sub.weird") == Path("a/b.de.ttml")
+    assert subtitle_dest(Path("a/b.mp4"), "https://x/y/sub") == Path("a/b.de.ttml")
+
+
+def test_render_missing_timestamp_uses_unknown_year():
+    r = MediathekResult.from_api(
+        {"channel": "WDR", "topic": "T", "title": "x", "timestamp": 0, "url_video": "u", "id": "1"}
+    )
+    ep = Episode(result=r, season=0, episode=1)
+    p = render(ep, tier="high", ext="mp4")
+    assert "unknown" in str(p)
+    assert "1970" not in str(p)
+
+
+def test_render_missing_timestamp_date_token_unknown():
+    r = MediathekResult.from_api(
+        {"channel": "WDR", "topic": "T", "title": "x", "timestamp": 0, "url_video": "u", "id": "1"}
+    )
+    ep = Episode(result=r, season=0, episode=1)
+    p = render(ep, template="{date}.{ext}", tier="high", ext="mp4")
+    assert p == Path("unknown.mp4")

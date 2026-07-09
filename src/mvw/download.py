@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import contextlib
 import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import httpx
 
@@ -84,7 +85,7 @@ def remote_size(url: str, *, client: httpx.Client | None = None) -> int | None:
 
 def pick_resolution(result: MediathekResult, preference: str) -> tuple[str, str]:
     url, tier = result.resolve_video(preference)
-    if not url:
+    if not url or not tier:
         raise DownloadError("no video URL available for this entry")
     return url, tier
 
@@ -124,7 +125,7 @@ def download(
                     mode = "wb"
                 total = None
                 cl = resp.headers.get("content-length")
-                if cl is not None:
+                if cl is not None and cl.isdigit():
                     total = int(cl) + existing
                 # Resume guard: a 206 whose total disagrees with the known
                 # expected size means the remote changed under us. Drop the
@@ -158,8 +159,10 @@ def download(
     # Completeness check: prefer the server's Content-Length total for this
     # transfer; fall back to the API-provided expected_size. Promote .part to
     # the final name only after this passes.
-    effective = total if total is not None else (
-        expected_size if expected_size and expected_size > 0 else None
+    effective = (
+        total
+        if total is not None
+        else (expected_size if expected_size and expected_size > 0 else None)
     )
     if effective is not None and downloaded != effective:
         part.unlink(missing_ok=True)
@@ -178,11 +181,10 @@ def download_hls(
     ffmpeg: str = "ffmpeg",
     on_progress: ProgressCb | None = None,
     poll_interval: float = 0.5,
+    stall_timeout: float = 300.0,
 ) -> Path:
     if shutil.which(ffmpeg) is None:
-        raise FFmpegMissingError(
-            "ffmpeg not found on PATH; required for HLS (.m3u8) downloads"
-        )
+        raise FFmpegMissingError("ffmpeg not found on PATH; required for HLS (.m3u8) downloads")
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
     part.unlink(missing_ok=True)
@@ -192,20 +194,32 @@ def download_hls(
         # HLS has no known total, so report bytes written so far against an
         # indeterminate total (None) to drive a live size/speed display.
         if on_progress is not None:
-            try:
+            with contextlib.suppress(OSError):
                 on_progress(part.stat().st_size, None)
-            except OSError:
-                pass
 
     # Stream ffmpeg's chatty stderr to a temp file rather than a PIPE we never
     # read; an unread PIPE can fill its buffer and deadlock the child.
     with tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace") as errf:
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=errf)
         try:
+            last_size = -1
+            last_change = time.monotonic()
             while proc.poll() is None:
                 report()
+                size = part.stat().st_size if part.exists() else 0
+                if size != last_size:
+                    last_size = size
+                    last_change = time.monotonic()
+                elif time.monotonic() - last_change > stall_timeout:
+                    proc.kill()
+                    proc.wait()
+                    part.unlink(missing_ok=True)
+                    raise DownloadError(f"ffmpeg stalled: no data written for {stall_timeout:.0f}s")
                 time.sleep(poll_interval)
         finally:
+            # Never leave an orphaned ffmpeg behind (stall, Ctrl-C, ...).
+            if proc.poll() is None:
+                proc.kill()
             proc.wait()
         if proc.returncode != 0:
             errf.seek(0)

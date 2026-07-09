@@ -1,64 +1,135 @@
 from __future__ import annotations
 
 import json as jsonlib
+from enum import StrEnum
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console, Group
 from rich.live import Live
 from rich.progress import (
-    BarColumn, DownloadColumn, MofNCompleteColumn, Progress, SpinnerColumn,
-    TextColumn, TimeRemainingColumn, TransferSpeedColumn,
+    BarColumn,
+    DownloadColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeRemainingColumn,
+    TransferSpeedColumn,
 )
 
+from mvw import __version__, display, episodes, filters, naming, query
 from mvw import config as configmod
-from mvw import display, episodes, filters, naming, query
 from mvw.api import MediathekClient, MediathekError
 from mvw.download import (
-    DownloadError, FFmpegMissingError, download as download_file, download_hls,
-    is_hls, pick_resolution, remote_size, verify_size,
+    DownloadError,
+    FFmpegMissingError,
+    download_hls,
+    is_hls,
+    pick_resolution,
+    remote_size,
+    verify_size,
+)
+from mvw.download import (
+    download as download_file,
 )
 
-app = typer.Typer(help="Search and download from MediathekViewWeb.", no_args_is_help=True)
+app = typer.Typer(
+    help="Search and download from MediathekViewWeb.",
+    no_args_is_help=True,
+    pretty_exceptions_show_locals=False,
+)
 console = Console()
 err_console = Console(stderr=True)
 
 
+class SortField(StrEnum):
+    timestamp = "timestamp"
+    duration = "duration"
+    channel = "channel"
+
+
+class SortOrder(StrEnum):
+    asc = "asc"
+    desc = "desc"
+
+
+class Resolution(StrEnum):
+    low = "low"
+    medium = "medium"
+    high = "high"
+    best = "best"
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(f"mvw {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the version and exit.",
+    ),
+) -> None:
+    """Search and download from MediathekViewWeb."""
+
+
+def _load_config() -> dict:
+    try:
+        return configmod.load()
+    except configmod.ConfigError as exc:
+        err_console.print(display.error_panel(str(exc)))
+        raise typer.Exit(2) from exc
+
+
 def _make_client(cfg: dict) -> MediathekClient:
-    return MediathekClient(
-        user_agent=cfg["user_agent"], timeout=cfg["request_timeout"]
-    )
+    return MediathekClient(user_agent=cfg["user_agent"], timeout=cfg["request_timeout"])
 
 
 @app.command()
 def search(
     query_str: str = typer.Argument("", help="MVW query string, e.g. '!ARD #Tatort >80'"),
-    channel: Optional[str] = typer.Option(None, "--channel"),
-    topic: Optional[str] = typer.Option(None, "--topic"),
-    title: Optional[str] = typer.Option(None, "--title"),
-    description: Optional[str] = typer.Option(None, "--description"),
-    min_duration: Optional[int] = typer.Option(None, "--min-duration", help="minutes"),
-    max_duration: Optional[int] = typer.Option(None, "--max-duration", help="minutes"),
-    sort: str = typer.Option("timestamp", "--sort"),
-    order: str = typer.Option("desc", "--order"),
+    channel: str | None = typer.Option(None, "--channel"),
+    topic: str | None = typer.Option(None, "--topic"),
+    title: str | None = typer.Option(None, "--title"),
+    description: str | None = typer.Option(None, "--description"),
+    min_duration: int | None = typer.Option(None, "--min-duration", help="minutes"),
+    max_duration: int | None = typer.Option(None, "--max-duration", help="minutes"),
+    sort: SortField = typer.Option(SortField.timestamp, "--sort"),
+    order: SortOrder = typer.Option(SortOrder.desc, "--order"),
     future: bool = typer.Option(False, "--future"),
     limit: int = typer.Option(15, "--limit"),
     offset: int = typer.Option(0, "--offset"),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
-    cfg = configmod.load()
+    cfg = _load_config()
     payload = query.build_payload(
-        query_str or None, channel=channel, topic=topic, title=title,
-        description=description, min_duration=min_duration, max_duration=max_duration,
-        sort_by=sort, sort_order=order, future=future, offset=offset, size=limit,
+        query_str or None,
+        channel=channel,
+        topic=topic,
+        title=title,
+        description=description,
+        min_duration=min_duration,
+        max_duration=max_duration,
+        sort_by=sort.value,
+        sort_order=order.value,
+        future=future,
+        offset=offset,
+        size=limit,
     )
     client = _make_client(cfg)
     try:
         result = client.query(payload)
     except MediathekError as exc:
         err_console.print(display.error_panel(str(exc)))
-        raise typer.Exit(2)
+        raise typer.Exit(2) from exc
 
     if json_out:
         console.print_json(jsonlib.dumps([r.__dict__ for r in result.results]))
@@ -73,40 +144,58 @@ def search(
     a = offset + 1
     b = offset + len(result.results)
     console.print(
-        f"[dim]showing {a}–{b} of {total} · "
-        f"{result.query_info.search_engine_time:.1f} ms[/]"
+        f"[dim]showing {a}–{b} of {total} · {result.query_info.search_engine_time:.1f} ms[/]"
     )
 
 
 @app.command()
 def download(
     query_str: str = typer.Argument("", help="MVW query string"),
-    channel: Optional[str] = typer.Option(None, "--channel"),
-    topic: Optional[str] = typer.Option(None, "--topic"),
-    title: Optional[str] = typer.Option(None, "--title"),
-    min_duration: Optional[int] = typer.Option(None, "--min-duration", help="minutes"),
-    max_duration: Optional[int] = typer.Option(None, "--max-duration", help="minutes"),
+    channel: str | None = typer.Option(None, "--channel"),
+    topic: str | None = typer.Option(None, "--topic"),
+    title: str | None = typer.Option(None, "--title"),
+    min_duration: int | None = typer.Option(None, "--min-duration", help="minutes"),
+    max_duration: int | None = typer.Option(None, "--max-duration", help="minutes"),
     season: bool = typer.Option(False, "--season", help="group into Plex season folders"),
     dry_run: bool = typer.Option(False, "--dry-run"),
-    resolution: Optional[str] = typer.Option(None, "--resolution"),
-    output: Optional[Path] = typer.Option(None, "--output", "-o"),
-    template: Optional[str] = typer.Option(None, "--template"),
+    resolution: Resolution | None = typer.Option(None, "--resolution"),
+    output: Path | None = typer.Option(None, "--output", "-o"),
+    template: str | None = typer.Option(None, "--template"),
     exclude: list[str] = typer.Option([], "--exclude", help="regex (repeatable)"),
     dedup: bool = typer.Option(False, "--dedup"),
     latest_season: bool = typer.Option(False, "--latest-season"),
-    season_number: Optional[int] = typer.Option(None, "--season-number"),
+    season_number: int | None = typer.Option(None, "--season-number"),
     subtitles: bool = typer.Option(False, "--subtitles"),
     force: bool = typer.Option(False, "--force", help="redownload even if a valid file exists"),
     limit: int = typer.Option(200, "--limit", help="max entries to resolve"),
 ) -> None:
-    cfg = configmod.load()
-    pref = resolution or cfg["resolution"]
+    cfg = _load_config()
+    pref = resolution.value if resolution else str(cfg["resolution"])
     tmpl = template or cfg["template"]
     out_dir = output or Path(cfg["download_dir"])
 
+    # The flag is enum-validated by typer; the config value is free text.
+    if pref not in Resolution.__members__:
+        valid = ", ".join(Resolution.__members__)
+        err_console.print(
+            display.error_panel(f"invalid resolution {pref!r} (from config); valid: {valid}")
+        )
+        raise typer.Exit(2)
+
+    # Validate user-supplied patterns before any network round trip.
+    try:
+        filters.compile_patterns(exclude)
+    except ValueError as exc:
+        err_console.print(display.error_panel(str(exc)))
+        raise typer.Exit(2) from exc
+
     payload = query.build_payload(
-        query_str or None, channel=channel, topic=topic, title=title,
-        min_duration=min_duration, max_duration=max_duration,
+        query_str or None,
+        channel=channel,
+        topic=topic,
+        title=title,
+        min_duration=min_duration,
+        max_duration=max_duration,
     )
     client = _make_client(cfg)
 
@@ -115,7 +204,7 @@ def download(
             rows = list(client.iter_all(payload, page_size=cfg["page_size"], cap=limit))
     except MediathekError as exc:
         err_console.print(display.error_panel(str(exc)))
-        raise typer.Exit(2)
+        raise typer.Exit(2) from exc
 
     rows = filters.exclude(rows, exclude)
     if dedup:
@@ -135,6 +224,7 @@ def download(
 
     # Build plan: (dest_path, url, tier, subtitle_url)
     plan: list[tuple[Path, str, str, str]] = []
+    seen_dests: set[Path] = set()
     for ep in ordered:
         try:
             url, tier = pick_resolution(ep.result, pref)
@@ -142,8 +232,19 @@ def download(
             err_console.print(display.error_panel(f"{ep.result.title}: {exc}"))
             continue
         ext = "mp4"
-        rendered = naming.render(ep, template=tmpl, tier=tier, ext=ext)
+        try:
+            rendered = naming.render(ep, template=tmpl, tier=tier, ext=ext)
+        except naming.TemplateError as exc:
+            err_console.print(display.error_panel(str(exc)))
+            raise typer.Exit(2) from exc
         dest = out_dir / rendered if season else out_dir / rendered.name
+        if dest in seen_dests:
+            _print_line(
+                f"[yellow]⚠[/] duplicate target {dest.name} — skipping (consider --dedup)",
+                error=True,
+            )
+            continue
+        seen_dests.add(dest)
         plan.append((dest, url, tier, ep.result.url_subtitle))
 
     if dry_run:
@@ -174,17 +275,22 @@ def _make_progress() -> tuple[Progress, Progress, Group]:
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
-        DownloadColumn(),       # bytes — correct here
+        DownloadColumn(),  # bytes — correct here
         TransferSpeedColumn(),
     )
     return overall, per_file, Group(overall, per_file)
+
+
+def _print_line(text: str, *, error: bool = False) -> None:
+    """Print a one-line status without wrapping (keeps Live output stable)."""
+    target = err_console if error else console
+    target.print(text, no_wrap=True, overflow="ignore", crop=False)
 
 
 def _run_downloads(plan, *, subtitles: bool, force: bool = False) -> None:
     overall_progress, file_progress, group = _make_progress()
     counts = {"downloaded": 0, "skipped": 0, "redownloaded": 0, "failed": 0}
     ffmpeg_missing = False
-    pkw = dict(no_wrap=True, overflow="ignore", crop=False)
     with Live(group, console=console):
         overall = overall_progress.add_task("Overall", total=len(plan))
         for dest, url, _tier, sub_url in plan:
@@ -197,14 +303,11 @@ def _run_downloads(plan, *, subtitles: bool, force: bool = False) -> None:
                 probe = None if hls else remote_size(url)
                 expected = 0 if (hls or probe is None) else probe
                 if verify_size(dest, expected):
-                    console.print(f"[green]✓[/] {dest.name} — already exists, skipped", **pkw)
+                    _print_line(f"[green]✓[/] {dest.name} — already exists, skipped")
                     counts["skipped"] += 1
                     overall_progress.advance(overall)
                     continue
-                console.print(
-                    f"[yellow]⚠[/] {dest.name} — corrupted (size mismatch), redownloading",
-                    **pkw,
-                )
+                _print_line(f"[yellow]⚠[/] {dest.name} — corrupted (size mismatch), redownloading")
                 dest.unlink(missing_ok=True)
                 is_redownload = True
 
@@ -220,30 +323,31 @@ def _run_downloads(plan, *, subtitles: bool, force: bool = False) -> None:
                 else:
                     download_file(url, dest, on_progress=cb, expected_size=probe)
                 counts["redownloaded" if is_redownload else "downloaded"] += 1
-                console.print(f"[cyan]↓[/] {dest.name} — downloaded", **pkw)
+                _print_line(f"[cyan]↓[/] {dest.name} — downloaded")
                 if subtitles and sub_url:
                     try:
-                        download_file(sub_url, dest.with_suffix(".xml"))
+                        download_file(sub_url, naming.subtitle_dest(dest, sub_url))
                     except DownloadError as exc:
-                        err_console.print(
-                            f"[yellow]⚠[/] {dest.name} (subtitle) — failed: {exc}", **pkw
+                        _print_line(
+                            f"[yellow]⚠[/] {dest.name} (subtitle) — failed: {exc}", error=True
                         )
             except FFmpegMissingError as exc:
                 ffmpeg_missing = True
-                err_console.print(display.error_panel(
-                    f"{dest.name}: {exc}\nInstall ffmpeg: https://ffmpeg.org/download.html"
-                ))
+                err_console.print(
+                    display.error_panel(
+                        f"{dest.name}: {exc}\nInstall ffmpeg: https://ffmpeg.org/download.html"
+                    )
+                )
             except DownloadError as exc:
                 counts["failed"] += 1
-                console.print(f"[red]✗[/] {dest.name} — failed: {exc}", **pkw)
+                _print_line(f"[red]✗[/] {dest.name} — failed: {exc}")
             finally:
                 file_progress.update(task, visible=False)
                 overall_progress.advance(overall)
-    console.print(
+    _print_line(
         f"[bold]Done:[/] {counts['downloaded']} downloaded, "
         f"{counts['skipped']} skipped, {counts['redownloaded']} redownloaded, "
-        f"{counts['failed']} failed",
-        **pkw,
+        f"{counts['failed']} failed"
     )
     if ffmpeg_missing:
         raise typer.Exit(4)
@@ -253,14 +357,14 @@ def _run_downloads(plan, *, subtitles: bool, force: bool = False) -> None:
 
 @app.command()
 def info(target: str = typer.Argument(..., help="query string; shows the first match")) -> None:
-    cfg = configmod.load()
+    cfg = _load_config()
     payload = query.build_payload(target, size=1)
     client = _make_client(cfg)
     try:
         result = client.query(payload)
     except MediathekError as exc:
         err_console.print(display.error_panel(str(exc)))
-        raise typer.Exit(2)
+        raise typer.Exit(2) from exc
     if not result.results:
         console.print("No results.")
         raise typer.Exit(0)
@@ -273,13 +377,17 @@ app.add_typer(config_app, name="config")
 
 @config_app.command("show")
 def config_show() -> None:
-    for k, v in configmod.load().items():
+    for k, v in _load_config().items():
         console.print(f"[cyan]{k}[/] = {v}")
 
 
 @config_app.command("set")
 def config_set(key: str, value: str) -> None:
-    configmod.set_value(key, value)
+    try:
+        configmod.set_value(key, value)
+    except configmod.ConfigError as exc:
+        err_console.print(display.error_panel(str(exc)))
+        raise typer.Exit(2) from exc
     console.print(f"Set [cyan]{key}[/] = {value}")
 
 

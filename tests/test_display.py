@@ -8,9 +8,18 @@ from mvw.models import MediathekResult
 
 
 def _r(**over):
-    base = dict(channel="WDR", topic="T", title="x", timestamp=1568707200,
-                duration=2700, size=1, url_video="https://v.mp4",
-                url_video_low="https://l.mp4", url_video_hd="https://h.mp4", id="1")
+    base = dict(
+        channel="WDR",
+        topic="T",
+        title="x",
+        timestamp=1568707200,
+        duration=2700,
+        size=1,
+        url_video="https://v.mp4",
+        url_video_low="https://l.mp4",
+        url_video_hd="https://h.mp4",
+        id="1",
+    )
     base.update(over)
     return MediathekResult.from_api(base)
 

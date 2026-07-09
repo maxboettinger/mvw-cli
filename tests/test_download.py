@@ -1,17 +1,38 @@
+import sys
 from pathlib import Path
 
 import httpx
 import pytest
 import respx
 
-from mvw.download import DownloadError, download, download_hls, is_hls, pick_resolution, remote_size, verify_size
+from mvw.download import (
+    DownloadError,
+    download,
+    download_hls,
+    is_hls,
+    pick_resolution,
+    remote_size,
+    verify_size,
+)
 from mvw.models import MediathekResult
+
+# The fake-ffmpeg stubs are POSIX shell scripts; the HLS logic they exercise
+# is platform-independent Python.
+posix_only = pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell stub")
 
 
 def _r(**over):
-    base = dict(channel="WDR", topic="T", title="x", timestamp=1, duration=1,
-                url_video="https://v/m.mp4", url_video_low="", url_video_hd="https://v/hd.mp4",
-                id="1")
+    base = dict(
+        channel="WDR",
+        topic="T",
+        title="x",
+        timestamp=1,
+        duration=1,
+        url_video="https://v/m.mp4",
+        url_video_low="",
+        url_video_hd="https://v/hd.mp4",
+        id="1",
+    )
     base.update(over)
     return MediathekResult.from_api(base)
 
@@ -72,14 +93,18 @@ def _fake_ffmpeg(tmp_path: Path, *, sleep: float = 0.0, rc: int = 0) -> Path:
     return script
 
 
+@posix_only
 def test_download_hls_reports_progress_and_writes_output(tmp_path: Path):
     ffmpeg = _fake_ffmpeg(tmp_path, sleep=0.6)  # outlive one poll tick
     dest = tmp_path / "out.mkv"
     seen: list[tuple[int, object]] = []
 
     result = download_hls(
-        "https://x/playlist.m3u8", dest, ffmpeg=str(ffmpeg),
-        on_progress=lambda d, t: seen.append((d, t)), poll_interval=0.1,
+        "https://x/playlist.m3u8",
+        dest,
+        ffmpeg=str(ffmpeg),
+        on_progress=lambda d, t: seen.append((d, t)),
+        poll_interval=0.1,
     )
 
     assert result == dest
@@ -90,6 +115,7 @@ def test_download_hls_reports_progress_and_writes_output(tmp_path: Path):
     assert seen[-1][0] == len(b"chunk-achunk-b")
 
 
+@posix_only
 def test_download_hls_raises_on_ffmpeg_failure(tmp_path: Path):
     ffmpeg = _fake_ffmpeg(tmp_path, rc=1)
     dest = tmp_path / "out.mkv"
@@ -143,9 +169,7 @@ class _ShortStream(httpx.SyncByteStream):
 
 @respx.mock
 def test_download_raises_when_short_of_expected_size(tmp_path: Path):
-    respx.get("https://v/m.mp4").mock(
-        return_value=httpx.Response(200, stream=_ShortStream())
-    )
+    respx.get("https://v/m.mp4").mock(return_value=httpx.Response(200, stream=_ShortStream()))
     dest = tmp_path / "out.mp4"
     with pytest.raises(DownloadError, match="size mismatch"):
         download("https://v/m.mp4", dest, expected_size=11)
@@ -168,13 +192,12 @@ def test_download_restarts_when_remote_total_differs(tmp_path: Path):
             # Resume attempt: server reports a different total (11) than the
             # caller's expected_size (20) -> remote changed, must restart.
             return httpx.Response(
-                206, content=b"world",
+                206,
+                content=b"world",
                 headers={"content-range": "bytes 6-10/11", "content-length": "5"},
             )
         # Restart attempt: full file from byte 0.
-        return httpx.Response(
-            200, content=b"hello world", headers={"content-length": "11"}
-        )
+        return httpx.Response(200, content=b"hello world", headers={"content-length": "11"})
 
     respx.get("https://v/m.mp4").mock(side_effect=handler)
     download("https://v/m.mp4", dest, expected_size=20)
@@ -193,7 +216,8 @@ def test_download_resume_continues_on_valid_206(tmp_path: Path):
     def handler(request):
         assert request.headers["range"] == "bytes=6-"
         return httpx.Response(
-            206, content=b"world",
+            206,
+            content=b"world",
             headers={"content-range": "bytes 6-10/11", "content-length": "5"},
         )
 
@@ -225,7 +249,7 @@ def test_remote_size_falls_back_to_range_when_head_unsupported():
 @respx.mock
 def test_remote_size_none_when_unknown():
     respx.head("https://v/m.mp4").mock(return_value=httpx.Response(200))  # no length
-    respx.get("https://v/m.mp4").mock(return_value=httpx.Response(200))   # ignores range
+    respx.get("https://v/m.mp4").mock(return_value=httpx.Response(200))  # ignores range
     assert remote_size("https://v/m.mp4") is None
 
 
@@ -234,3 +258,35 @@ def test_remote_size_none_on_network_error():
     respx.head("https://v/m.mp4").mock(side_effect=httpx.ConnectError("boom"))
     respx.get("https://v/m.mp4").mock(side_effect=httpx.ConnectError("boom"))
     assert remote_size("https://v/m.mp4") is None
+
+
+@respx.mock
+def test_download_ignores_malformed_content_length(tmp_path: Path):
+    respx.get("https://v/m.mp4").mock(
+        return_value=httpx.Response(200, content=b"data", headers={"content-length": "garbage"})
+    )
+    dest = tmp_path / "out.mp4"
+    download("https://v/m.mp4", dest)  # must not raise ValueError
+    assert dest.read_bytes() == b"data"
+
+
+@posix_only
+def test_download_hls_stall_timeout_kills_ffmpeg(tmp_path: Path):
+    script = tmp_path / "stalling_ffmpeg"
+    script.write_text("#!/bin/sh\nsleep 30\n")  # writes nothing, would hang
+    script.chmod(0o755)
+    dest = tmp_path / "out.mkv"
+    import time
+
+    start = time.monotonic()
+    with pytest.raises(DownloadError, match="stalled"):
+        download_hls(
+            "https://x/playlist.m3u8",
+            dest,
+            ffmpeg=str(script),
+            poll_interval=0.05,
+            stall_timeout=0.3,
+        )
+    assert time.monotonic() - start < 10  # killed, did not wait for the sleep
+    assert not dest.exists()
+    assert not dest.with_name("out.mkv.part").exists()
