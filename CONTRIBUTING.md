@@ -23,7 +23,10 @@ uv run pytest -q               # unit and mocked tests
 uv run ruff check .            # lint
 uv run ruff format --check .   # formatting
 uv run mypy src                # type check
+uv run pytest -q --cov=mvw --cov-fail-under=90   # coverage gate
 ```
+
+`main` is protected: PRs can only merge once the `all-green` CI check passes.
 
 There is one opt-in test that hits the real MediathekViewWeb API:
 

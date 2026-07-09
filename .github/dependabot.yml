@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Keep SHA-pinned actions fresh — pins are secure but go stale silently.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Python dependencies (pyproject.toml + uv.lock).
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"

@@ -43,3 +43,29 @@ jobs:
       - run: uv sync --locked
 
       - run: uv run pytest -q
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+
+      - run: uv sync --locked
+
+      - run: uv run pytest -q --cov=mvw --cov-report=term-missing --cov-fail-under=90
+
+  # Single required status check for branch protection: green iff every job
+  # above succeeded. Add new jobs to `needs` so protection keeps covering them.
+  all-green:
+    name: all-green
+    if: always()
+    needs: [lint, test, coverage]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any dependency failed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Coverage gate in CI (`pytest-cov`, ≥ 90%) and a single `all-green` status
+  check that branch protection on `main` requires.
+- Dependabot keeps GitHub Actions SHA pins and Python dependencies updated.
+
 ## [0.3.0] - 2026-07-09
 
 ### Added
