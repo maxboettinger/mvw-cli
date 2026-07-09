@@ -238,3 +238,26 @@ def test_overall_progress_counts_files_not_bytes():
     # Per-file bars are byte-based and keep the byte/speed columns.
     assert any(isinstance(c, DownloadColumn) for c in per_file.columns)
     assert any(isinstance(c, TransferSpeedColumn) for c in per_file.columns)
+
+
+def test_config_set_unknown_key_exits_2(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli.configmod, "config_path", lambda: tmp_path / "config.toml")
+    result = runner.invoke(cli.app, ["config", "set", "pagesize", "50"])
+    assert result.exit_code == 2
+    assert "unknown config key" in result.output
+
+
+def test_config_set_bad_value_exits_2(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli.configmod, "config_path", lambda: tmp_path / "config.toml")
+    result = runner.invoke(cli.app, ["config", "set", "page_size", "abc"])
+    assert result.exit_code == 2
+    assert "page_size" in result.output
+
+
+def test_corrupt_config_file_exits_2(monkeypatch, tmp_path):
+    p = tmp_path / "config.toml"
+    p.write_text("not = = valid")
+    monkeypatch.setattr(cli.configmod, "config_path", lambda: p)
+    result = runner.invoke(cli.app, ["config", "show"])
+    assert result.exit_code == 2
+    assert "config.toml" in result.output

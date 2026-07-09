@@ -38,6 +38,14 @@ console = Console()
 err_console = Console(stderr=True)
 
 
+def _load_config() -> dict:
+    try:
+        return configmod.load()
+    except configmod.ConfigError as exc:
+        err_console.print(display.error_panel(str(exc)))
+        raise typer.Exit(2) from exc
+
+
 def _make_client(cfg: dict) -> MediathekClient:
     return MediathekClient(user_agent=cfg["user_agent"], timeout=cfg["request_timeout"])
 
@@ -58,7 +66,7 @@ def search(
     offset: int = typer.Option(0, "--offset"),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
-    cfg = configmod.load()
+    cfg = _load_config()
     payload = query.build_payload(
         query_str or None,
         channel=channel,
@@ -118,7 +126,7 @@ def download(
     force: bool = typer.Option(False, "--force", help="redownload even if a valid file exists"),
     limit: int = typer.Option(200, "--limit", help="max entries to resolve"),
 ) -> None:
-    cfg = configmod.load()
+    cfg = _load_config()
     pref = resolution or cfg["resolution"]
     tmpl = template or cfg["template"]
     out_dir = output or Path(cfg["download_dir"])
@@ -279,7 +287,7 @@ def _run_downloads(plan, *, subtitles: bool, force: bool = False) -> None:
 
 @app.command()
 def info(target: str = typer.Argument(..., help="query string; shows the first match")) -> None:
-    cfg = configmod.load()
+    cfg = _load_config()
     payload = query.build_payload(target, size=1)
     client = _make_client(cfg)
     try:
@@ -299,13 +307,17 @@ app.add_typer(config_app, name="config")
 
 @config_app.command("show")
 def config_show() -> None:
-    for k, v in configmod.load().items():
+    for k, v in _load_config().items():
         console.print(f"[cyan]{k}[/] = {v}")
 
 
 @config_app.command("set")
 def config_set(key: str, value: str) -> None:
-    configmod.set_value(key, value)
+    try:
+        configmod.set_value(key, value)
+    except configmod.ConfigError as exc:
+        err_console.print(display.error_panel(str(exc)))
+        raise typer.Exit(2) from exc
     console.print(f"Set [cyan]{key}[/] = {value}")
 
 
