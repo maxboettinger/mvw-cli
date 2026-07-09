@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import httpx
@@ -14,6 +15,10 @@ from mvw.download import (
     verify_size,
 )
 from mvw.models import MediathekResult
+
+# The fake-ffmpeg stubs are POSIX shell scripts; the HLS logic they exercise
+# is platform-independent Python.
+posix_only = pytest.mark.skipif(sys.platform == "win32", reason="POSIX shell stub")
 
 
 def _r(**over):
@@ -88,6 +93,7 @@ def _fake_ffmpeg(tmp_path: Path, *, sleep: float = 0.0, rc: int = 0) -> Path:
     return script
 
 
+@posix_only
 def test_download_hls_reports_progress_and_writes_output(tmp_path: Path):
     ffmpeg = _fake_ffmpeg(tmp_path, sleep=0.6)  # outlive one poll tick
     dest = tmp_path / "out.mkv"
@@ -109,6 +115,7 @@ def test_download_hls_reports_progress_and_writes_output(tmp_path: Path):
     assert seen[-1][0] == len(b"chunk-achunk-b")
 
 
+@posix_only
 def test_download_hls_raises_on_ffmpeg_failure(tmp_path: Path):
     ffmpeg = _fake_ffmpeg(tmp_path, rc=1)
     dest = tmp_path / "out.mkv"
@@ -263,6 +270,7 @@ def test_download_ignores_malformed_content_length(tmp_path: Path):
     assert dest.read_bytes() == b"data"
 
 
+@posix_only
 def test_download_hls_stall_timeout_kills_ffmpeg(tmp_path: Path):
     script = tmp_path / "stalling_ffmpeg"
     script.write_text("#!/bin/sh\nsleep 30\n")  # writes nothing, would hang
